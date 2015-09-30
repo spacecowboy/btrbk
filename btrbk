@@ -98,6 +98,9 @@ my %config_options = (
   btrfs_progs_compat        => { default => undef,    accept => [ "yes", "no" ] },
   group                     => { default => undef,    accept_regexp => qr/^$group_match(\s*,\s*$group_match)*$/, split => qr/\s*,\s*/ },
 
+  snapshot_qgroup_destroy   => { default => undef,    accept => [ "yes", "no" ] },
+  target_qgroup_destroy     => { default => undef,    accept => [ "yes", "no" ] },
+
   # deprecated options
   snapshot_create_always    => { default => undef, accept => [ "yes", "no" ],
                                  deprecated => { yes => { warn => "Please use \"snapshot_create always\"",
@@ -933,6 +936,28 @@ sub btrfs_subvolume_delete($@)
                    );
   ERROR "Failed to delete btrfs subvolumes: " . join(' ', map( { $_->{PRINT} } @$targets)) unless(defined($ret));
   return defined($ret) ? scalar(@$targets) : undef;
+}
+
+
+# destroy qgroup_id 0/<subvolume_id>
+sub btrfs_qgroup_destroy($)
+{
+  my $vol = shift // die;
+  my $vol_id = $vol->{id};
+  unless($vol_id) {
+    ERROR "Unknown subvolume_id for: $vol->{PRINT}";
+    return undef;
+  }
+  my $qgroup_id = "0/$vol_id";
+  DEBUG "[btrfs] qgroup delete";
+  DEBUG "[btrfs]   qgroup_id: $qgroup_id";
+  DEBUG "[btrfs]   subvolume: $vol->{PRINT}";
+  INFO "Destroying qgroup \"$qgroup_id\" for: $vol->{PRINT}";
+  my $ret = run_cmd(cmd => [ qw(btrfs qgroup destroy), $qgroup_id, $vol->{PATH} ],
+                    rsh => $vol->{RSH},
+                   );
+  ERROR "Failed to destroy qgroup for subvolumes: $vol->{PRINT}" unless(defined($ret));
+  return defined($ret) ? $vol : undef;
 }
 
 
@@ -2642,6 +2667,15 @@ MAIN:
               preserve_latest      => $preserve_latest_backup,
               log_verbose          => 1,
              );
+            if(config_key($config_subvol, "target_qgroup_destroy")) {
+              foreach(@$delete) {
+                my $ret = btrfs_qgroup_destroy($_);
+                unless(defined($ret)) {
+                  $config_subvol->{ABORTED} = "Failed to destroy qgroup";
+                }
+              }
+            }
+
             my $ret = btrfs_subvolume_delete($delete, commit => config_key($config_target, "btrfs_commit_delete"));
             if(defined($ret)) {
               INFO "Deleted $ret subvolumes in: $droot->{PRINT}/$snapshot_basename.*";
@@ -2684,6 +2718,15 @@ MAIN:
             preserve_latest      => $preserve_latest_snapshot,
             log_verbose          => 1,
            );
+          if(config_key($config_subvol, "snapshot_qgroup_destroy")) {
+            foreach(@$delete) {
+              my $ret = btrfs_qgroup_destroy($_);
+              unless(defined($ret)) {
+                $config_subvol->{ABORTED} = "Failed to destroy qgroup";
+              }
+            }
+          }
+
           my $ret = btrfs_subvolume_delete($delete, commit => config_key($config_subvol, "btrfs_commit_delete"));
           if(defined($ret)) {
             INFO "Deleted $ret subvolumes in: $sroot->{PRINT}/$snapdir$snapshot_basename.*";
