@@ -1,34 +1,6 @@
 btrbk FAQ
 =========
 
-How can I backup from non-btrfs hosts?
---------------------------------------
-
-First create a btrfs subvolume on the backup server:
-
-    # btrfs subvolume create /mnt/btr_backup/myhost_sync
-
-In your daily cron script, prior to running btrbk, sync your source to
-`myhost_sync`, something like:
-
-    rsync -a --delete -e ssh myhost.mydomain.com://data/ /mnt/btr_backup/myhost_sync/
-
-Then run btrbk, with myhost_sync configured *without any targets* as
-follows:
-
-    volume /mnt/btr_backup
-      subvolume myhost_sync
-        snapshot_name    myhost
-
-        snapshot_create  always
-        snapshot_preserve_daily    14
-        snapshot_preserve_weekly   20
-        snapshot_preserve_monthly  all
-
-This will produce daily snapshots `/mnt/btr_backup/myhost.20150101`,
-with retention as defined with the snapshot_preserve_* options.
-
-
 How can I auto-mount btrfs filesystems used by btrbk?
 -----------------------------------------------------
 
@@ -37,15 +9,15 @@ valid mount-points, you can loop through the configuration and mount
 the volumes like this:
 
     #!/bin/sh
-    btrbk config dump volume | while read line; do
+    btrbk list volume --format=raw | while read line; do
         eval $line
         $volume_rsh mount $volume_path
     done
 
-Note that the `btrbk config dump volume` command accepts filters (see
-[btrbk(1)], FILTER STATEMENTS), which means you can e.g. add "group
-automount" tags in your configuration and dump only the volumes of
-this group: `btrbk config dump volume automount`.
+Note that the `btrbk list` command accepts filters (see [btrbk(1)],
+FILTER STATEMENTS), which means you can e.g. add "group automount"
+tags in your configuration and dump only the volumes of this group:
+`btrbk list volume automount`.
 
   [btrbk(1)]: http://www.digint.ch/btrbk/doc/btrbk.html
 

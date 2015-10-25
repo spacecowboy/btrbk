@@ -19,6 +19,8 @@ Key Features:
 - Backups to multiple destinations
 - Transfer via ssh
 - Resume of backups (if backup target was not reachable for a while)
+- Encrypted backups to non-btrfs destinations
+- Transaction log
 - Display file changes between two backups
 
 btrbk is intended to be run as a cron job.
@@ -63,7 +65,7 @@ Grab the digint portage overlay from:
 
 ### Debian Based Distros
 
-btrbk is in `stretch (testing) (utils)`: https://packages.debian.org/stretch/btrbk
+btrbk is in `sid (unstable) (utils)`: https://packages.debian.org/sid/btrbk
 
 Packages are also available via NeuroDebian: http://neuro.debian.net/pkgs/btrbk.html
 
@@ -262,13 +264,48 @@ from 192.168.0.42. The source filesystem is never altered because of
 `snapshot_preserve_daily all`.
 
 
+Example: backup from non-btrfs source
+-------------------------------------
+
+First create a btrfs subvolume on the backup server:
+
+    # btrfs subvolume create /mnt/btr_backup/myhost_sync
+
+In your daily cron script, prior to running btrbk, sync your source to
+`myhost_sync`, something like:
+
+    rsync -a --delete -e ssh myhost.mydomain.com://data/ /mnt/btr_backup/myhost_sync/
+
+Then run btrbk, with myhost_sync configured *without any targets* as
+follows:
+
+    volume /mnt/btr_backup
+      subvolume myhost_sync
+        snapshot_name    myhost
+
+        snapshot_preserve_daily    14
+        snapshot_preserve_weekly   20
+        snapshot_preserve_monthly  all
+
+This will produce daily snapshots `/mnt/btr_backup/myhost.20150101`,
+with retention as defined with the snapshot_preserve_* options.
+
+Note that the provided script: "contrib/cron/btrbk-mail" has support
+for this!
+
+
 Example: encrypted backup to non-btrfs target
 ---------------------------------------------
 
 If your backup server does not support btrfs, you can send your
 subvolumes to a raw file.
 
-Note: this is an _experimental_ feature!
+This is an _experimental_ feature: btrbk supports "raw" targets,
+meaning that similar to the "send-receive" target the btrfs subvolume
+is being sent using `btrfs send` (mirroring filesystem level data),
+but instead of instantly being received (`btrfs receive`) by the
+target filesystem, it is being redirected to a file, optionally
+compressed and piped through GnuPG.
 
 /etc/btrbk/btrbk.conf:
 
@@ -279,16 +316,20 @@ Note: this is an _experimental_ feature!
 
     volume /mnt/btr_pool
       subvolume home
-        target raw ssh://myserver.mydomain.com/backup
+        target raw ssh://cloud.example.com/backup
           ssh_user     btrbk
-          incremental  no
+          # incremental  no
 
-This will create a GnuPG encrypted, compressed file
-`/backup/home.YYYYMMDD.btrfs_<received_uuid>.xz.gpg` on the target
-host.
+This will create a GnuPG encrypted, compressed files on the target
+host:
 
-While incremental backups are also supported for raw targets, this is
-not recommended (see [btrbk.conf(5)] for details).
+- `/backup/home.YYYYMMDD.btrfs_<received_uuid>.xz.gpg` for
+   non-incremental images,
+- `/backup/home.YYYYMMDD.btrfs_<received_uuid>@<parent_uuid>.xz.gpg`
+  for subsequent incremenal images.
+
+I you are using raw _incremental_ backups, please make sure you
+understand the implications (see [btrbk.conf(5)], TARGET TYPES).
 
 
 Setting up SSH
@@ -364,7 +405,7 @@ Example: Restore a Snapshot
 
 First, pick a snapshot to be restored:
 
-    btrbk tree
+    btrbk list snapshots
 
 From the list, pick the snapshot you want to restore. Let's say it's
 `/mnt/btr_pool/_btrbk_snap/data.20150101`.
@@ -388,7 +429,7 @@ Example: Restore a Backup
 
 First, pick a backup to be restored:
 
-    btrbk tree
+    btrbk list backups
 
 From the list, pick the backup you want to restore. Let's say it's
 `/mnt/btr_backup/data.20150101`.

@@ -1,4 +1,4 @@
-.TH "btrbk" "1" "2015-09-29" "btrbk v0.21.0-dev" ""
+.TH "btrbk" "1" "2015-10-25" "btrbk v0.21.0" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -9,7 +9,9 @@ btrbk \- backup tool for btrfs volumes
 .nf
 \fBbtrbk\fR [\-h|\-\-help] [\-\-version] [\-c|\-\-config <file>]
       [\-p|\-\-preserve] [\-r|\-\-resume\-only]
-      [\-v|\-\-verbose] [\-q|\-\-quiet] [\-l|\-\-loglevel <level>] [\-\-progress]
+      [\-v|\-\-verbose] [\-q|\-\-quiet] [\-l|\-\-loglevel <level>]
+      [\-t|\-\-table] [\-\-format <output\-format>]
+      [\-\-progress]
       <command> [<args>]
 .fi
 .SH DESCRIPTION
@@ -64,7 +66,8 @@ set to \[lq]yes\[rq] in the configuration file.
 .PP
 \-v, \-\-verbose
 .RS 4
-Verbose output. Identical to: \-l info.
+Verbose output. Sets "\-l info", and prints detailed scheduler
+information on "run" and "dryrun" commands.
 .RE
 .PP
 \-q, \-\-quiet
@@ -79,10 +82,17 @@ Set the level of verbosity. Accepted levels are warn, info, debug,
 and trace.
 .RE
 .PP
-\-\-raw\-output
+\-t, \-\-table
 .RS 4
-Print raw (machine-readable) output. Changes output format for
-\fBrun\fR, \fBdryrun\fR and \fBtree\fR. Useful for further scripting.
+Print output in table format (shortcut for "--format=table").
+.RE
+.PP
+\-\-format table|long|raw
+.RS 4
+Print output in specified format. If set to "raw", prints
+space-separated key="value" pairs (machine-readable). Affects output
+format for \fBrun\fR, \fBdryrun\fR, \fBlist\fR and \fBtree\fR
+commands. Useful for further exporting/scripting.
 .RE
 .PP
 \-\-progress
@@ -121,25 +131,8 @@ configured retention policy will be deleted. Note that the latest
 snapshot as well as the latest backup is always preserved, regardless
 of the retention policy.
 .PP
-If the \-\-raw\-output command line option is set, print the output in
-the following format:
-.PP
-.RS 4
-snapshot <snapshot-url> <src-subvol-url>
-...
-.RE
-.RS 4
-receive <target-url> <src-subvol-url> [<parent-subvol-url>]
-...
-.RE
-.RS 4
-delete <target-url>
-...
-.RE
-.RS 4
-aborted [volume|subvolume|target] <url> -- abort_reason
-...
-.RE
+Use the \fI\-\-format\fR command line option to switch between
+different output formats.
 .RE
 .PP
 .B dryrun
@@ -151,28 +144,48 @@ in conjunction with \fI\-l debug\fR to see the btrfs commands that
 would be executed.
 .RE
 .PP
-.B info
+.B list
+<subcommand> [filter...]
+.RS 4
+Print information defined by <subcommand> in a tabular form. Optionally
+filtered by [filter...] arguments (see \fIFILTER STATEMENTS\fR
+below).
+.PP
+Available subcommands:
+.TP 11
+.B snapshots
+All snapshots (and corresponding backups).
+.PD 0
+.TP 11
+.B backups
+All backups (and corresponding snapshots).
+.TP 11
+.B latest
+Most recent snapshots and backups.
+.TP 11
+.B config
+Configured source/snapshot/target relations.
+.TP 11
+.B source
+Configured source/snapshot relations.
+.TP 11
+.B volume
+Configured volume sections.
+.TP 11
+.B target
+Configured targets.
+.PD
+.PP
+Use the \fI\-\-format\fR command line option to switch between
+different output formats.
+.RE
+.PP
+.B usage
 [filter...]
 .RS 4
 Print filesystem usage information for all source/target
 volumes. Optionally filtered by [filter...] arguments (see \fIFILTER
 STATEMENTS\fR below).
-.RE
-.PP
-.B tree
-[filter...]
-.RS 4
-Print the snapshots and their corresponding backup subvolumes as a
-tree. Optionally filtered by [filter...] arguments (see \fIFILTER
-STATEMENTS\fR below).
-.PP
-If the \-\-raw\-output command line option is set, print the output in
-the following format:
-.PP
-.RS 4
-<subvol-url> <snapshot-url> <received-from-url>
-...
-.RE
 .RE
 .PP
 .B origin
@@ -188,17 +201,19 @@ parent-child relationship as well as the received-from information.
 Print new files since subvolume <from> for subvolume <to>.
 .RE
 .PP
-.B config dump
-volume|source|target [filter...] \fI*experimental*\fR
+.B config
+print|print-all
 .RS 4
-Dump parsed content from the configuration file, in format: key="value"...
+Prints the parsed configuration file. Use the \fI\-\-format\fR command
+line option to switch between different output formats.
 .RE
 .SH FILTER STATEMENTS
 Filter arguments are accepted in form:
 .PP
 [hostname:]<volume-directory>
 .RS 4
-Matches all subvolumes and targets of a \fIvolume\fR configuration section.
+Matches all subvolumes and targets of a \fIvolume\fR configuration
+section.
 .RE
 .PP
 [hostname:]<volume-directory>/<subvolume-name>
