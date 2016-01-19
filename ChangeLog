@@ -1,3 +1,17 @@
+btrbk-0.22.0
+
+  * Bugfix: fix monthly schedule if older than 10 weeks (close: #59).
+  * Bugfix: fix sprintf used by config option "timestamp_format long"
+    when using perl-5.22.0 (close: #57).
+  * Bugfix: fix "--progress" option (close: #64).
+  * Added "clean" command (close: #61).
+  * Added "-n, --dry-run" option.
+  * Added configuration options "raw_target_compress_level",
+    "raw_target_compress_threads" (close: #60).
+  * Added "stats" command (close: #54).
+  * Print "$hostname:$path" instead of "{$hostname}$path" in summary
+    and logs.
+
 btrbk-0.21.0
 
   * Added transaction log (configuration option "transaction_log").

@@ -65,13 +65,20 @@ Grab the digint portage overlay from:
 
 ### Debian Based Distros
 
-btrbk is in `sid (unstable) (utils)`: https://packages.debian.org/sid/btrbk
+btrbk is in `stretch (testing) (utils)`: https://packages.debian.org/stretch/btrbk
 
 Packages are also available via NeuroDebian: http://neuro.debian.net/pkgs/btrbk.html
 
 ### Arch Linux
 
 btrbk is in AUR: https://aur.archlinux.org/packages/btrbk/
+
+### Alpine Linux
+
+btrbk is in `testing`, install with:
+
+    apk add btrbk
+
 
   [btrbk source tarball]: http://www.digint.ch/download/btrbk/releases/
   [btrbk debian package]: http://www.digint.ch/download/btrbk/packages/debian/

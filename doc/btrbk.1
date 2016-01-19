@@ -1,4 +1,4 @@
-.TH "btrbk" "1" "2015-10-25" "btrbk v0.21.0" ""
+.TH "btrbk" "1" "2016-01-19" "btrbk v0.22.0" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -8,7 +8,7 @@ btrbk \- backup tool for btrfs volumes
 .SH SYNOPSIS
 .nf
 \fBbtrbk\fR [\-h|\-\-help] [\-\-version] [\-c|\-\-config <file>]
-      [\-p|\-\-preserve] [\-r|\-\-resume\-only]
+      [\-n|\-\-dry\-run] [\-p|\-\-preserve] [\-r|\-\-resume\-only]
       [\-v|\-\-verbose] [\-q|\-\-quiet] [\-l|\-\-loglevel <level>]
       [\-t|\-\-table] [\-\-format <output\-format>]
       [\-\-progress]
@@ -44,6 +44,14 @@ Prints the synopsis and a list of the commands.
 \-\-version
 .RS 4
 Prints the btrbk version.
+.RE
+.PP
+\-n, \-\-dry\-run
+.RS 4
+Don't run anything that would alter the filesystem, just show the
+snapshots and backup subvolumes that would be created/deleted by the
+\fBrun\fR and \fBclean\fR commands. Use in conjunction with \fI\-l
+debug\fR to see the btrfs commands that would be executed.
 .RE
 .PP
 \-c, \-\-config <file>
@@ -138,10 +146,17 @@ different output formats.
 .B dryrun
 [filter...]
 .RS 4
-Don't run btrfs commands, just show the snapshots and backup
-subvolumes that would be created/deleted by the \fBrun\fR command. Use
-in conjunction with \fI\-l debug\fR to see the btrfs commands that
-would be executed.
+Don't run any btrfs commands that would alter the filesystem, just
+show the snapshots and backup subvolumes that would be created/deleted
+by the \fBrun\fR command. Use in conjunction with \fI\-l debug\fR to
+see the btrfs commands that would be executed.
+.RE
+.PP
+.B stats
+[filter...]
+.RS 4
+Print statistics of snapshot and backup subvolumes. Optionally
+filtered by [filter...] arguments (see \fIFILTER STATEMENTS\fR below).
 .RE
 .PP
 .B list
@@ -178,6 +193,15 @@ Configured targets.
 .PP
 Use the \fI\-\-format\fR command line option to switch between
 different output formats.
+.RE
+.PP
+.B clean
+[filter...]
+.RS 4
+Delete incomplete (garbled) backups. Incomplete backups can be left
+behind on network errors or kill signals while a send/receive
+operation is ongoing, and are identified by the "received_uuid" flag
+not being set on a target (backup) subvolume.
 .RE
 .PP
 .B usage
@@ -239,8 +263,8 @@ Matches the \fIgroup\fR configuration option of a \fIvolume\fR,
 \fIsubvolume\fR or \fItarget\fR section.
 .RE
 .PP
-For convenience, [hostname:] can be specified as either "hostname:",
-"{hostname}" or "ssh://hostname/".
+For convenience, [hostname:] can be specified as either "hostname:" or
+"ssh://hostname/".
 .SH FILES
 .PP
 /etc/btrbk.conf

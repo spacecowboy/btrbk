@@ -48,7 +48,7 @@ use Getopt::Long qw(GetOptions);
 use POSIX qw(strftime);
 use Data::Dumper;
 
-our $VERSION       = "0.21.0";
+our $VERSION       = "0.22.0";
 our $AUTHOR        = 'Axel Burri <axel@tty0.ch>';
 our $PROJECT_HOME  = '<http://www.digint.ch/btrbk/>';
 
@@ -72,53 +72,55 @@ my %config_options = (
   # NOTE: the parser always maps "no" to undef
   # NOTE: keys "volume", "subvolume" and "target" are hardcoded
   # NOTE: files "." and "no" map to <undef>
-  timestamp_format          => { default => "short",  accept => [ "short", "long" ], context => [ "root", "volume", "subvolume" ] },
-  snapshot_dir              => { default => undef,    accept_file => { relative => 1 } },
-  snapshot_name             => { default => undef,    accept_file => { name_only => 1 }, context => [ "subvolume" ] },   # NOTE: defaults to the subvolume name (hardcoded)
-  snapshot_create           => { default => "always", accept => [ "no", "always", "ondemand", "onchange" ] },
-  incremental               => { default => "yes",    accept => [ "yes", "no", "strict" ] },
-  resume_missing            => { default => "yes",    accept => [ "yes", "no" ] },
-  preserve_day_of_week      => { default => "sunday", accept => [ (keys %day_of_week_map) ] },
-  snapshot_preserve_daily   => { default => "all",    accept => [ "all" ], accept_numeric => 1  },
-  snapshot_preserve_weekly  => { default => 0,        accept => [ "all" ], accept_numeric => 1  },
-  snapshot_preserve_monthly => { default => "all",    accept => [ "all" ], accept_numeric => 1  },
-  target_preserve_daily     => { default => "all",    accept => [ "all" ], accept_numeric => 1  },
-  target_preserve_weekly    => { default => 0,        accept => [ "all" ], accept_numeric => 1  },
-  target_preserve_monthly   => { default => "all",    accept => [ "all" ], accept_numeric => 1  },
-  btrfs_commit_delete       => { default => undef,    accept => [ "after", "each", "no" ] },
-  ssh_identity              => { default => undef,    accept_file => { absolute => 1 } },
-  ssh_user                  => { default => "root",   accept_regexp => qr/^[a-z_][a-z0-9_-]*$/ },
-  ssh_port                  => { default => "default", accept => [ "default" ], accept_numeric => 1 },
-  ssh_compression           => { default => undef,    accept => [ "yes", "no" ] },
-  ssh_cipher_spec           => { default => "default", accept_regexp => qr/^$ssh_cipher_match(,$ssh_cipher_match)*$/ },
-  transaction_log           => { default => undef,    accept_file => { absolute => 1 } },
+  timestamp_format            => { default => "short",   accept => [ "short", "long" ], context => [ "root", "volume", "subvolume" ] },
+  snapshot_dir                => { default => undef,     accept_file => { relative => 1 } },
+  snapshot_name               => { default => undef,     accept_file => { name_only => 1 }, context => [ "subvolume" ] },   # NOTE: defaults to the subvolume name (hardcoded)
+  snapshot_create             => { default => "always",  accept => [ "no", "always", "ondemand", "onchange" ] },
+  incremental                 => { default => "yes",     accept => [ "yes", "no", "strict" ] },
+  resume_missing              => { default => "yes",     accept => [ "yes", "no" ] },
+  preserve_day_of_week        => { default => "sunday",  accept => [ (keys %day_of_week_map) ] },
+  snapshot_preserve_daily     => { default => "all",     accept => [ "all" ], accept_numeric => 1  },
+  snapshot_preserve_weekly    => { default => 0,         accept => [ "all" ], accept_numeric => 1  },
+  snapshot_preserve_monthly   => { default => "all",     accept => [ "all" ], accept_numeric => 1  },
+  target_preserve_daily       => { default => "all",     accept => [ "all" ], accept_numeric => 1  },
+  target_preserve_weekly      => { default => 0,         accept => [ "all" ], accept_numeric => 1  },
+  target_preserve_monthly     => { default => "all",     accept => [ "all" ], accept_numeric => 1  },
+  btrfs_commit_delete         => { default => undef,     accept => [ "after", "each", "no" ] },
+  ssh_identity                => { default => undef,     accept_file => { absolute => 1 } },
+  ssh_user                    => { default => "root",    accept_regexp => qr/^[a-z_][a-z0-9_-]*$/ },
+  ssh_port                    => { default => "default", accept => [ "default" ], accept_numeric => 1 },
+  ssh_compression             => { default => undef,     accept => [ "yes", "no" ] },
+  ssh_cipher_spec             => { default => "default", accept_regexp => qr/^$ssh_cipher_match(,$ssh_cipher_match)*$/ },
+  transaction_log             => { default => undef,     accept_file => { absolute => 1 } },
 
-  raw_target_compress       => { default => undef,    accept => [ "no", "gzip", "bzip2", "xz" ] },
-  raw_target_encrypt        => { default => undef,    accept => [ "no", "gpg" ] },
-  gpg_keyring               => { default => undef,    accept_file => { absolute => 1 } },
-  gpg_recipient             => { default => undef,    accept_regexp => qr/^[0-9a-zA-Z_@\+\-\.]+$/ },
+  raw_target_compress         => { default => undef,     accept => [ "no", "gzip", "bzip2", "xz" ] },
+  raw_target_compress_level   => { default => "default", accept => [ "default" ], accept_numeric => 1 },
+  raw_target_compress_threads => { default => "default", accept => [ "default" ], accept_numeric => 1 },
+  raw_target_encrypt          => { default => undef,     accept => [ "no", "gpg" ] },
+  gpg_keyring                 => { default => undef,     accept_file => { absolute => 1 } },
+  gpg_recipient               => { default => undef,     accept_regexp => qr/^[0-9a-zA-Z_@\+\-\.]+$/ },
 
-  btrfs_progs_compat        => { default => undef,    accept => [ "yes", "no" ] },
-  group                     => { default => undef,    accept_regexp => qr/^$group_match(\s*,\s*$group_match)*$/, split => qr/\s*,\s*/ },
+  btrfs_progs_compat          => { default => undef,     accept => [ "yes", "no" ] },
+  group                       => { default => undef,     accept_regexp => qr/^$group_match(\s*,\s*$group_match)*$/, split => qr/\s*,\s*/ },
 
   snapshot_qgroup_destroy   => { default => undef,    accept => [ "yes", "no" ] },
   target_qgroup_destroy     => { default => undef,    accept => [ "yes", "no" ] },
 
   # deprecated options
-  snapshot_create_always    => { default => undef, accept => [ "yes", "no" ],
-                                 deprecated => { yes => { warn => "Please use \"snapshot_create always\"",
-                                                          replace_key   => "snapshot_create",
-                                                          replace_value => "always",
-                                                         },
-                                                 no  => { warn => "Please use \"snapshot_create no\" or \"snapshot_create ondemand\"",
-                                                          replace_key   => "snapshot_create",
-                                                          replace_value => "ondemand",
-                                                         }
-                                                },
-                               },
-  receive_log               => { default => undef, accept => [ "sidecar", "no" ], accept_file => { absolute => 1 },
-                                 deprecated => { DEFAULT => { warn => "ignoring" } },
-                               }
+  snapshot_create_always      => { default => undef, accept => [ "yes", "no" ],
+                                   deprecated => { yes => { warn => "Please use \"snapshot_create always\"",
+                                                            replace_key   => "snapshot_create",
+                                                            replace_value => "always",
+                                                           },
+                                                   no  => { warn => "Please use \"snapshot_create no\" or \"snapshot_create ondemand\"",
+                                                            replace_key   => "snapshot_create",
+                                                            replace_value => "ondemand",
+                                                           }
+                                                  },
+                                 },
+  receive_log                 => { default => undef, accept => [ "sidecar", "no" ], accept_file => { absolute => 1 },
+                                   deprecated => { DEFAULT => { warn => "ignoring" } },
+                                 }
  );
 
 my @config_target_types = qw(send-receive raw);
@@ -208,6 +210,7 @@ sub HELP_MESSAGE
   print STDERR "   -h, --help            display this help message\n";
   print STDERR "       --version         display version information\n";
   print STDERR "   -c, --config=FILE     specify configuration file\n";
+  print STDERR "   -n, --dry-run         perform a trial run with no changes made\n";
   print STDERR "   -p, --preserve        preserve all backups (do not delete any old targets)\n";
   print STDERR "   -r, --resume-only     resume only (do not create new snapshots, only resume\n";
   print STDERR "                         missing backups)\n";
@@ -221,6 +224,7 @@ sub HELP_MESSAGE
   print STDERR "commands:\n";
   print STDERR "   run                 perform backup operations as defined in the config file\n";
   print STDERR "   dryrun              don't run btrfs commands; show what would be executed\n";
+  print STDERR "   stats               print snapshot/backup statistics\n";
   print STDERR "   list <subcommand>   available subcommands are:\n";
   print STDERR "      backups          all backups and corresponding snapshots\n";
   print STDERR "      snapshots        all snapshots and corresponding backups\n";
@@ -229,6 +233,7 @@ sub HELP_MESSAGE
   print STDERR "      source           configured source/snapshot relations\n";
   print STDERR "      volume           configured volume sections\n";
   print STDERR "      target           configured targets\n";
+  print STDERR "   clean               delete incomplete (garbled) backups\n";
   print STDERR "   usage               print filesystem usage\n";
   print STDERR "   origin <subvol>     print origin information for subvolume\n";
   print STDERR "   diff   <from> <to>  shows new files since subvolume <from> for subvolume <to>\n";
@@ -323,44 +328,57 @@ sub end_transaction($$)
 
 sub run_cmd(@)
 {
+  # shell-based implementation.
+  # this needs some redirection magic for filter_stderr to work.
+  # NOTE: multiple filters are not supported!
+
   my @commands = (ref($_[0]) eq "HASH") ? @_ : { @_ };
+  die unless(scalar(@commands));
   $err = "";
 
-  my $cmd = "";
-  my $name = "";
   my $destructive = 0;
-  my $pipe = "";
   my $catch_stderr = 0;
   my $filter_stderr = undef;
   foreach (@commands) {
     $_->{rsh} //= [];
     $_->{cmd} = [ @{$_->{rsh}}, @{$_->{cmd}} ];
     $_->{cmd_text} = join(' ', map { s/\n/\\n/g; "'$_'" } @{$_->{cmd}});  # ugly escape of \n, do we need to escape others?
-    $name = $_->{name} // $_->{cmd_text};
-    $_->{_buf} = '';
-    $cmd .= $pipe . $_->{cmd_text};
-    $pipe = ' | ';
-    if($_->{catch_stderr}) {
-      $catch_stderr = 1;
-      $filter_stderr = $_->{filter_stderr};
-    }
+    $catch_stderr = 1 if($_->{catch_stderr});
+    $filter_stderr = $_->{filter_stderr} if($_->{filter_stderr});  # NOTE: last filter wins!
     $destructive = 1 unless($_->{non_destructive});
   }
+  my $cmd_print = join(' | ', map { $_->{cmd_text} } @commands);
 
-  if($dryrun && $destructive) {
-    DEBUG "### (dryrun) $cmd";
-    return "";
-  }
-  DEBUG "### $cmd";
-
+  my $cmd = $cmd_print;
   if($catch_stderr) {
     if(scalar(@commands) == 1) {
+      # no pipes, simply redirect stderr to stdout
       $cmd .= ' 2>&1';
-    } else {
-      $cmd = '{ ' . $cmd . ' ; } 2>&1';
+    }
+    else
+    {
+      # pipe chain is more complicated, result is something like this:
+      #    { btrfs send <src> 2>&3 | pv | btrfs receive <dst> 2>&3 ; } 3>&1
+      $cmd = "{ ";
+      my $pipe = "";
+      foreach (@commands) {
+        $cmd .= $pipe . $_->{cmd_text};
+        $cmd .= ' 2>&3' if($_->{catch_stderr});
+        $pipe = ' | ';
+      }
+      $cmd .= ' ; } 3>&1';
     }
   }
 
+  # hide redirection magic from debug output
+  if($dryrun && $destructive) {
+    DEBUG "### (dryrun) $cmd_print";
+    return "";
+  }
+  DEBUG "### $cmd_print";
+
+  # execute command and parse output
+  TRACE "Executing command: $cmd";
   my $ret = "";
   $ret = `$cmd`;
   chomp($ret);
@@ -373,7 +391,7 @@ sub run_cmd(@)
     if($catch_stderr) {
       $_ = $ret;
       &{$filter_stderr} ($cmd) if($filter_stderr);
-      ERROR "[$cmd] $_" if($_);
+      ERROR "[$cmd_print] $_" if($_);
     }
     return undef;
   }
@@ -416,7 +434,7 @@ sub vinfo($$)
       %info,
       HOST         => $host,
       PATH         => $path,
-      PRINT        => "{$host}$path",
+      PRINT        => "$host:$path",
       RSH_TYPE     => "ssh",
       SSH_USER     => $ssh_user,
       SSH_IDENTITY => $ssh_identity,
@@ -1297,9 +1315,10 @@ sub btrfs_send_receive($$$$)
     cmd => [ qw(btrfs send), @send_options, $snapshot_path ],
     rsh => $snapshot->{RSH},
     name => "btrfs send",
+    catch_stderr => 1, # hack for shell-based run_cmd()
   };
   push @cmd_pipe, {
-    cmd => [ '/usr/bin/pv' ],
+    cmd => [ '/usr/bin/pv', '-trab' ],
   } if($show_progress);
   push @cmd_pipe, {
     cmd => [ qw(btrfs receive), @receive_options, $target_path . '/' ],
@@ -1381,9 +1400,9 @@ sub btrfs_send_to_file($$$$;@)
   $target_filename .= '@' . $parent_uuid if($parent_uuid);
   $target_filename .= ".btrfs";
 
-  my %compress = ( gzip  => { pipe => { cmd => [ 'gzip'  ], name => 'gzip'  }, postfix => '.gz'  },
-                   bzip2 => { pipe => { cmd => [ 'bzip2' ], name => 'bzip2' }, postfix => '.bz2' },
-                   xz    => { pipe => { cmd => [ 'xz'    ], name => 'xz'    }, postfix => '.xz'  },
+  my %compress = ( gzip  => { name => 'gzip' , cmd => [ 'gzip'  ], postfix => '.gz',  level_min => 1, level_max => 9 },
+                   bzip2 => { name => 'bzip2', cmd => [ 'bzip2' ], postfix => '.bz2', level_min => 1, level_max => 9 },
+                   xz    => { name => 'xz'   , cmd => [ 'xz'    ], postfix => '.xz',  level_min => 0, level_max => 9, threads => '--threads=' },
                   );
 
   my @send_options;
@@ -1397,12 +1416,36 @@ sub btrfs_send_to_file($$$$;@)
     name => "btrfs send",
   };
   push @cmd_pipe, {
-    cmd => [ '/usr/bin/pv' ],
+    cmd => [ '/usr/bin/pv', '-trab' ],
   } if($show_progress);
   if($opts{compress}) {
     die unless($compress{$opts{compress}});
     $target_filename .= $compress{$opts{compress}}->{postfix};
-    push @cmd_pipe, $compress{$opts{compress}}->{pipe};
+    my $compress_cmd = $compress{$opts{compress}}->{cmd};
+    if(defined($opts{compress_level}) && ($opts{compress_level} ne "default")) {
+      my $compress_level = $opts{compress_level};
+      if($compress_level < $compress{$opts{compress}}->{level_min}) {
+        WARN "Compression level (raw_target_compress_level) capped to minimum for '$opts{compress}': $compress{$opts{compress}}->{level_min}";
+        $compress_level = $compress{$opts{compress}}->{level_min};
+      }
+      if($compress_level > $compress{$opts{compress}}->{level_max}) {
+        WARN "Compression level (raw_target_compress_level) capped to maximum for '$opts{compress}': $compress{$opts{compress}}->{level_max}";
+        $compress_level = $compress{$opts{compress}}->{level_max};
+      }
+      push @$compress_cmd, '-' . $compress_level;
+    }
+    if(defined($opts{compress_threads}) && ($opts{compress_threads} ne "default")) {
+      my $thread_opt = $compress{$opts{compress}}->{threads};
+      if($thread_opt) {
+        push @$compress_cmd, $thread_opt . $opts{compress_threads};
+      }
+      else {
+        WARN "Threading (raw_target_compress_threads) is not supported for '$opts{compress}', ignoring";
+      }
+    }
+    push @cmd_pipe, { cmd => $compress_cmd,
+                      name => $compress{$opts{compress}}->{name}
+                     };
   }
   if($opts{encrypt}) {
     die unless($opts{encrypt}->{type} eq "gpg");
@@ -1610,7 +1653,7 @@ sub macro_send_receive($@)
   # check for existing target subvolume
   if(my $err_vol = vinfo_subvol($target, $snapshot->{NAME})) {
     ABORTED($config_target, "Target subvolume \"$err_vol->{PRINT}\" already exists");
-    $config_target->{UNRECOVERABLE} = "Please delete stray subvolume: $err_vol->{PRINT}";
+    $config_target->{UNRECOVERABLE} = "Please delete stray subvolume (\"btrbk clean\"): $err_vol->{PRINT}";
     ERROR $config_target->{ABORTED} . ", aborting send/receive of: $snapshot->{PRINT}";
     ERROR $config_target->{UNRECOVERABLE};
     $info{ERROR} = 1;
@@ -1658,7 +1701,6 @@ sub macro_send_receive($@)
       }
     }
 
-    my $compress = config_key($config_target, "raw_target_compress");
     my $encrypt = undef;
     my $encrypt_type = config_key($config_target, "raw_target_encrypt");
     if($encrypt_type) {
@@ -1668,7 +1710,12 @@ sub macro_send_receive($@)
                    recipient => config_key($config_target, "gpg_recipient"),
                  }
     }
-    $ret = btrfs_send_to_file($snapshot, $target, $parent, \$vol_received, compress => $compress, encrypt => $encrypt);
+    $ret = btrfs_send_to_file($snapshot, $target, $parent, \$vol_received,
+                              compress         => config_key($config_target, "raw_target_compress"),
+                              compress_level   => config_key($config_target, "raw_target_compress_level"),
+                              compress_threads => config_key($config_target, "raw_target_compress_threads"),
+                              encrypt          => $encrypt
+                             );
     ABORTED($config_target, "Failed to send subvolume to raw file") unless($ret);
   }
   else
@@ -1920,14 +1967,14 @@ sub schedule(@)
     }
     $first_in_delta_weeks{$href->{delta_weeks}} //= $href;
   }
-  foreach (reverse sort keys %first_in_delta_weeks) {
+  foreach (sort {$b <=> $a} keys %first_in_delta_weeks) {
     my $href = $first_in_delta_weeks{$_} || die;
     if($preserve_weekly && (($preserve_weekly eq "all") || ($href->{delta_weeks} <= $preserve_weekly))) {
       $href->{preserve} ||= "preserved weekly: $href->{delta_weeks} weeks ago, " . ($href->{err_days} ? "+$href->{err_days} days after " : "on ") . "$preserve_day_of_week";
     }
     $last_weekly_in_delta_months{$href->{delta_months}} = $href;
   }
-  foreach (reverse sort keys %last_weekly_in_delta_months) {
+  foreach (sort {$b <=> $a} keys %last_weekly_in_delta_months) {
     my $href = $last_weekly_in_delta_months{$_} || die;
     if($preserve_monthly && (($preserve_monthly eq "all") || ($href->{delta_months} <= $preserve_monthly))) {
       $href->{preserve} ||= "preserved monthly: " . ($href->{err_days} ? "$href->{err_days} days after " : "") . "last $preserve_day_of_week of month $href->{month} (age: $href->{delta_months} months)";
@@ -2028,6 +2075,20 @@ sub print_header(@)
     print "\n";
   }
   print "--------------------------------------------------------------------------------\n";
+}
+
+
+sub print_table($;$)
+{
+  my $data = shift;
+  my $spacing = shift // "  ";
+  my $maxlen = 0;
+  foreach (@$data) {
+    $maxlen = length($_->[0]) if($maxlen < length($_->[0]));
+  }
+  foreach (@$data) {
+    print $_->[0] . ((' ' x ($maxlen - length($_->[0]))) . $spacing) . $_->[1] . "\n";
+  }
 }
 
 
@@ -2161,6 +2222,7 @@ MAIN:
     'help|h'        => sub { VERSION_MESSAGE(); HELP_MESSAGE(0); exit 0; },
     'version'       => sub { VERSION_MESSAGE(); exit 0; },
     'config|c=s'    => \$config_cmdline,
+    'dry-run|n'     => \$dryrun,
     'preserve|p'    => \$preserve_backups,
     'resume-only|r' => \$resume_only,
     'quiet|q'       => \$quiet,
@@ -2197,7 +2259,7 @@ MAIN:
     WARN 'found option "--progress", but "pv" is not present: (please install "pv")';
     $show_progress = 0;
   }
-  my ($action_run, $action_usage, $action_resolve, $action_diff, $action_origin, $action_config_print, $action_list);
+  my ($action_run, $action_usage, $action_resolve, $action_diff, $action_origin, $action_config_print, $action_list, $action_clean);
   my @filter_args;
   my $args_allow_group = 1;
   my $args_expected_min = 0;
@@ -2206,6 +2268,10 @@ MAIN:
     $action_run = 1;
     $dryrun = 1 if($command eq "dryrun");
     $args_allow_group = 1;
+    @filter_args = @ARGV;
+  }
+  elsif ($command eq "clean") {
+    $action_clean = 1;
     @filter_args = @ARGV;
   }
   elsif ($command eq "usage") {
@@ -2245,6 +2311,10 @@ MAIN:
     }
     @filter_args = @ARGV;
   }
+  elsif($command eq "stats") {
+    $action_resolve = "stats";
+    @filter_args = @ARGV;
+  }
   elsif ($command eq "config") {
     my $subcommand = shift @ARGV // "";
     @filter_args = @ARGV;
@@ -2281,9 +2351,6 @@ MAIN:
       $_ = $1; # untaint argument
     }
     elsif(/^(?<host>$ip_addr_match|$host_name_match):\/(?<file>$file_match)$/) {  # convert "my.host.com:/my/path" to ssh url
-      $_ = "ssh://$+{host}/$+{file}";
-    }
-    elsif(/^\{(?<host>$ip_addr_match|$host_name_match)\}\/(?<file>$file_match)$/) {  # convert "{my.host.com}/my/path" to ssh url
       $_ = "ssh://$+{host}/$+{file}";
     }
     else {
@@ -2420,7 +2487,7 @@ MAIN:
   #
   # open transaction log
   #
-  if($action_run && (not $dryrun) && config_key($config, "transaction_log")) {
+  if(($action_run || $action_clean) && (not $dryrun) && config_key($config, "transaction_log")) {
     init_transaction_log(config_key($config, "transaction_log"));
   }
   action("startup", status => "v$VERSION", message => "$version_info");
@@ -2429,7 +2496,7 @@ MAIN:
   #
   # filter subvolumes matching command line arguments
   #
-  if(($action_run || $action_resolve || $action_usage || $action_list || $action_config_print) && scalar(@filter_args))
+  if(($action_run || $action_clean || $action_resolve || $action_usage || $action_list || $action_config_print) && scalar(@filter_args))
   {
     my %match;
     foreach my $config_vol (@{$config->{VOLUME}}) {
@@ -2880,6 +2947,11 @@ MAIN:
   if($action_resolve)
   {
     my @data;
+    my @stats_data;
+    my $stats_snapshots_total = 0;
+    my $stats_backups_total = 0;
+    my $stats_backups_total_incomplete = 0;
+    my $stats_backups_total_orphaned = 0;
     my %droot_compat;
     if($action_resolve eq "snapshots")
     {
@@ -2918,7 +2990,7 @@ MAIN:
         }
       }
     }
-    elsif($action_resolve eq "backups")
+    elsif(($action_resolve eq "backups") || ($action_resolve eq "stats"))
     {
       #
       # print all targets and their corresponding source snapshots
@@ -2931,12 +3003,26 @@ MAIN:
           my $svol = $config_subvol->{svol} || die;
           my $snapshot_name = config_key($config_subvol, "snapshot_name") // die;
           my @snapshot_children = get_snapshot_children($sroot, $svol);
+          my $stats_snapshot_uptodate = "";
+          foreach my $snapshot (@snapshot_children) {
+            if($snapshot->{cgen} == $svol->{gen}) {
+              $stats_snapshot_uptodate = " (up-to-date)";
+              last;
+            }
+          }
+          push @stats_data, [ $svol->{PRINT}, sprintf("%4u snapshots$stats_snapshot_uptodate", scalar(@snapshot_children)) ];
+          $stats_snapshots_total += scalar(@snapshot_children);  # NOTE: this adds ALL snaphot children under $sroot (not only the ones created by btrbk!)
+
           foreach my $config_target (@{$config_subvol->{TARGET}}) {
             next if($config_target->{ABORTED});
             my $droot = $config_target->{droot} || die;
             $droot_compat{$droot->{URL}} = 1 if($droot->{BTRFS_PROGS_COMPAT});
+            my $stats_received = 0;
+            my $stats_orphaned = 0;
+            my $stats_incomplete = 0;
             foreach my $target_vol (sort { $a->{SUBVOL_PATH} cmp $b->{SUBVOL_PATH} } values %{vinfo_subvol_list($droot)}) {
               my $parent_snapshot;
+              my $incomplete_backup;
               foreach (@snapshot_children) {
                 if($droot->{BTRFS_PROGS_COMPAT}) {
                   if($_->{NAME} eq $target_vol->{NAME}) {
@@ -2944,6 +3030,13 @@ MAIN:
                     last;
                   }
                 } else {
+                  if($target_vol->{received_uuid} eq '-') {
+                    # incomplete received (garbled) subvolumes have no received_uuid (as of btrfs-progs v4.3.1).
+                    # a subvolume in droot matching our naming is considered incomplete if received_uuid is not set!
+                    $parent_snapshot = undef;
+                    $incomplete_backup = 1;
+                    last;
+                  }
                   if($_->{uuid} eq $target_vol->{received_uuid}) {
                     $parent_snapshot = $_;
                     last;
@@ -2951,6 +3044,7 @@ MAIN:
                 }
               }
               if($parent_snapshot) {
+                $stats_received++;
                 push @data, { type => "received",
                               vinfo_prefixed_keys("target", $target_vol),
                               vinfo_prefixed_keys("snapshot", $parent_snapshot),
@@ -2961,8 +3055,9 @@ MAIN:
               else {
                 # don't display all subvolumes in $droot, only the ones matching snapshot_name
                 if(parse_filename($target_vol->{SUBVOL_PATH}, $snapshot_name, ($config_target->{target_type} eq "raw"))) {
+                  if($incomplete_backup) { $stats_incomplete++; } else { $stats_orphaned++; }
                   push @data, { type => "received",
-                                status => "orphaned",
+                                status => ($incomplete_backup ? "incomplete" : "orphaned"),
                                 vinfo_prefixed_keys("target", $target_vol),
                                 vinfo_prefixed_keys("source", $svol),
                               };
@@ -2972,6 +3067,16 @@ MAIN:
                 }
               }
             }
+            my $stats_total = $stats_received + $stats_incomplete + $stats_orphaned;
+            $stats_backups_total            += $stats_total;
+            $stats_backups_total_incomplete += $stats_incomplete;
+            $stats_backups_total_orphaned   += $stats_orphaned;
+            my @stats_detail;
+            push @stats_detail, "$stats_orphaned orphaned"     if($stats_orphaned);
+            push @stats_detail, "$stats_incomplete incomplete" if($stats_incomplete);
+            my $stats_detail_print = join(', ', @stats_detail);
+            $stats_detail_print = "   ($stats_detail_print)" if($stats_detail_print);
+            push @stats_data, [ "^-- $droot->{PRINT}/$snapshot_name.*", sprintf("%4u backups$stats_detail_print", $stats_total) ];
           }
         }
       }
@@ -3021,9 +3126,123 @@ MAIN:
       WARN "Received subvolumes (backups) are guessed by subvolume name for targets (btrfs_progs_compat=yes):";
       WARN " - target: $_" foreach(sort keys %droot_compat);
     }
-    print_formatted("resolved", \@data);
+    if($action_resolve eq "stats") {
+      print_header(title => "Statistics",
+                   config => $config,
+                   time => $start_time,
+                  );
+
+      print_table(\@stats_data, "  ");
+      print "\n";
+      my $stats_filter = $config->{CMDLINE_FILTER_LIST} ? join("; ", @{$config->{CMDLINE_FILTER_LIST}}) : "";
+      my @stats_total_detail;
+      push @stats_total_detail, "$stats_backups_total_orphaned orphaned"     if($stats_backups_total_orphaned);
+      push @stats_total_detail, "$stats_backups_total_incomplete incomplete" if($stats_backups_total_incomplete);
+      my $stats_total_detail_print = join(', ', @stats_total_detail);
+      $stats_total_detail_print = " ($stats_total_detail_print)" if($stats_total_detail_print);
+      print "Total" . ($stats_filter ? " ($stats_filter)" : "") . ":\n";
+      my $maxlen = ($stats_snapshots_total > $stats_backups_total) ? length($stats_snapshots_total) : length($stats_backups_total);
+      printf("%" . $maxlen . "u snapshots\n", $stats_snapshots_total);
+      printf("%" . $maxlen . "u backups$stats_total_detail_print\n",   $stats_backups_total);
+    }
+    else {
+      print_formatted("resolved", \@data);
+    }
 
     exit exit_status($config);
+  }
+
+
+  if($action_clean)
+  {
+    #
+    # identify and delete incomplete backups
+    #
+    my @out;
+    foreach my $config_vol (@{$config->{VOLUME}})
+    {
+      next if($config_vol->{ABORTED});
+      my $sroot = $config_vol->{sroot} || die;
+      foreach my $config_subvol (@{$config_vol->{SUBVOLUME}})
+      {
+        next if($config_subvol->{ABORTED});
+        my $svol = $config_subvol->{svol} || die;
+        my $snapshot_name = config_key($config_subvol, "snapshot_name") // die;
+        foreach my $config_target (@{$config_subvol->{TARGET}})
+        {
+          next if($config_target->{ABORTED});
+          my $droot = $config_target->{droot} || die;
+          if($droot->{BTRFS_PROGS_COMPAT}) {
+            WARN "btrfs_progs_compat is set, skipping cleanup of target: $droot->{PRINT}";
+            next;
+          }
+
+          INFO "Cleaning incomplete backups in: $droot->{PRINT}/$snapshot_name.*";
+          push @out, "$droot->{PRINT}/$snapshot_name.*";
+          my @delete;
+          foreach my $target_vol (sort { $a->{SUBVOL_PATH} cmp $b->{SUBVOL_PATH} } values %{vinfo_subvol_list($droot)}) {
+            # incomplete received (garbled) subvolumes have no received_uuid (as of btrfs-progs v4.3.1).
+            # a subvolume in droot matching our naming is considered incomplete if received_uuid is not set!
+            if(($target_vol->{received_uuid} eq '-') && parse_filename($target_vol->{SUBVOL_PATH}, $snapshot_name)) {
+              DEBUG "Found incomplete target subvolume: $target_vol->{PRINT}";
+              push(@delete, $target_vol);
+              push @out, "--- $target_vol->{PRINT}";
+            }
+          }
+          my $ret = btrfs_subvolume_delete(\@delete, commit => config_key($config_target, "btrfs_commit_delete"), type => "delete_garbled");
+          if(defined($ret)) {
+            INFO "Deleted $ret incomplete backups in: $droot->{PRINT}/$snapshot_name.*";
+            $config_target->{SUBVOL_DELETED} = \@delete;
+          }
+          else {
+            ABORTED($config_target, "Failed to delete incomplete target subvolume");
+            push @out, "!!! Target \"$droot->{PRINT}\" aborted: $config_target->{ABORTED}";
+          }
+          push(@out, "<no_action>") unless(scalar(@delete));
+          push(@out, "");
+        }
+      }
+    }
+
+    my $exit_status = exit_status($config);
+    my $time_elapsed = time - $start_time;
+    INFO "Completed within: ${time_elapsed}s  (" . localtime(time) . ")";
+    action("finished",
+           status => $exit_status ? "partial" : "success",
+           duration => $time_elapsed,
+           message => $exit_status ? "At least one delete operation failed" : undef,
+          );
+    close_transaction_log();
+
+    #
+    # print summary
+    #
+    unless($quiet)
+    {
+      $output_format ||= "custom";
+      if($output_format eq "custom")
+      {
+        print_header(title => "Cleanup Summary",
+                     config => $config,
+                     time => $start_time,
+                     legend => [
+                       "---  deleted subvolume (incomplete backup)",
+                      ],
+                    );
+        print join("\n", @out);
+        if($dryrun) {
+          print "\nNOTE: Dryrun was active, none of the operations above were actually executed!\n";
+        }
+      }
+      else
+      {
+        # print action log (without transaction start messages)
+        my @data = grep { $_->{status} ne "starting" } @transaction_log;
+        print_formatted("transaction", \@data, title => "TRANSACTION LOG");
+      }
+    }
+
+    exit $exit_status;
   }
 
 
@@ -3089,7 +3308,7 @@ MAIN:
           # find unique snapshot name
           my $timestamp = ((config_key($config_subvol, "timestamp_format") eq "short") ?
                            sprintf("%04d%02d%02d", @today) :
-                           sprintf("%04d%02d%02dT%02d%02d", @today_and_now));
+                           sprintf("%04d%02d%02dT%02d%02d", @today_and_now[0..4]));
           my @unconfirmed_target_name;
           my @lookup = keys %{vinfo_subvol_list($sroot)};
           @lookup = grep s/^\Q$snapdir\E// , @lookup;
@@ -3179,7 +3398,7 @@ MAIN:
                 push(@schedule, { value      => $child,
                                   btrbk_date => $filename_info->{btrbk_date},
                                   preserve   => $child->{FORCE_PRESERVE},
-                                 }),
+                                 });
               }
             }
 
