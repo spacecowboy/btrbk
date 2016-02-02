@@ -1,3 +1,12 @@
+btrbk-0.22.2
+
+  * Bugfix: fix checks on "btrfs sub show" output, which resulted in
+    breakage on btrfs-progs < 4.1 (close: #68).
+
+btrbk-0.22.1
+
+  * Support for btrfs-progs v4.4 (close: #66).
+
 btrbk-0.22.0
 
   * Bugfix: fix monthly schedule if older than 10 weeks (close: #59).
