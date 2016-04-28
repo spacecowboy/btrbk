@@ -1,4 +1,4 @@
-.TH "btrbk.conf" "5" "2016-02-02" "btrbk v0.22.2" ""
+.TH "btrbk.conf" "5" "2016-04-23" "btrbk v0.23.0" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -41,7 +41,11 @@ sections are allowed within \fIvolume\fR sections.
 Target type and directory where the backup subvolumes are to be
 created. See the TARGET TYPES section for supported
 \fI<type>\fR. Multiple \fItarget\fR sections are allowed within
-\fIsubvolume\fR sections.
+\fIsubvolume\fR sections. A \fItarget\fR section defined in the global
+context or in a \fIvolume\fR section is propagated (mulitplied) to all
+underlying \fIsubvolume\fR sections, unless a target with the same
+declaration already exists (hint: run "btrbk config print" to see the
+resulting configuration).
 .RE
 .PP
 For the \fIvolume\fR and \fItarget\fR sections, you can specify a
@@ -66,19 +70,27 @@ subvolume delete) as well as abort messages are logged to <file>, in a
 space-separated table format.
 .RE
 .PP
-\fBtimestamp_format\fR  short|long
+\fBtimestamp_format\fR  short|long|long-iso
 .RS 4
-Timestamp format used as postfix for new snapshot subvolume names.
-Defaults to \[lq]short\[rq].
+Timestamp format used as postfix for new snapshot subvolume
+names. Defaults to \[lq]short\[rq].
 .PP
-.IP \fBshort\fR
+.IP \fBshort\fR 10
 YYYYMMDD[_N]  (e.g. "20150825", "20150825_1")
-.IP \fBlong\fR
+.IP \fBlong\fR 10
 YYYYMMDD<T>hhmm[_N]  (e.g. "20150825T1531")
+.IP \fBlong-iso\fR 10
+YYYYMMDD<T>hhmmss\[t+-]hhmm[_N]  (e.g. "20150825T153123+0200")
 .PP
-Note that a postfix "_N" is only appended to the timestamp if a
-snapshot/backup already exists with the timestamp of current
-date/time.
+Note that a postfix "_N" is appended to the timestamp if a snapshot or
+backup already exists with the timestamp of current date/time.
+.PP
+Use \[lq]long-iso\[rq] if you want to make sure that btrbk never
+creates ambiguous time stamps (which can happen if multiple snapshots
+are created during a daylight saving time clock change).
+.PP
+Note that using \[lq]long-iso\[rq] has implications on the scheduling,
+see RETENTION POLICY (caveats) below.
 .RE
 .PP
 \fBsnapshot_dir\fR  <directory>
@@ -96,19 +108,18 @@ valid in the \fIsubvolume\fR section. Defaults to
 \fI<subvolume-name>\fR.
 .RE
 .PP
-\fBsnapshot_create\fR  always|ondemand|onchange|no
+\fBsnapshot_create\fR  always|onchange|ondemand|no
 .RS 4
-If set to \[lq]ondemand\[rq], snapshots are only created if the target
-subvolume is reachable (useful if you are tight on disk space and you
-only need btrbk for backups to an external disk which is not always
-connected).  If set to \[lq]onchange\[rq], snapshots are only created
-if the source subvolume has changed since the last snapshot (more
-precisely: if the btrfs generation has been increased since the last
-snapshot). If set to \[lq]always\[rq], snapshots are always
-created. If set to \[lq]no\[rq], the snapshots are never created
-(useful in conjunction with the \fIresume_missing\fR option if another
-instance of btrbk is taking care of snapshot creation). Defaults to
-\[lq]always\[rq].
+If set to \[lq]always\[rq], snapshots are always created. If set to
+\[lq]onchange\[rq], snapshots are only created if the source subvolume
+has changed since the last snapshot (more precisely: if the btrfs
+generation has been increased since the last snapshot). If set to
+\[lq]ondemand\[rq], snapshots are only created if the target subvolume
+is reachable (useful if you are tight on disk space and you only need
+btrbk for backups to an external disk which is not always
+connected). If set to \[lq]no\[rq], the snapshots are never created
+(useful if another instance of btrbk is taking care of snapshot
+creation). Defaults to \[lq]always\[rq].
 .RE
 .PP
 \fBincremental\fR  yes|no|strict
@@ -118,44 +129,39 @@ non-incremental (initial) backups are never created. Defaults to
 \[lq]yes\[rq].
 .RE
 .PP
-\fBresume_missing\fR  yes|no
+\fBsnapshot_preserve\fR  no|<retention_policy>
 .RS 4
-If set, the backups in the target directory are compared to the source
-snapshots, and missing backups are created if needed (complying to the
-target preserve matrix). Defaults to \[lq]yes\[rq].
+Set retention policy for snapshots (see RETENTION POLICY below). If
+set to \[lq]no\[rq], preserve snapshots according to
+\fIsnapshot_preserve_min\fR only. Defaults to \[lq]no\[rq].
 .RE
 .PP
-\fBtarget_preserve_daily\fR  all|<number>
+\fBsnapshot_preserve_min\fR  all|latest|<number>{h,d,w,m,y}
 .RS 4
-How many days of backups should be preserved. Defaults to \[lq]all\[rq].
+Preserve all snapshots for a minimum amount of hours (h), days (d),
+weeks (w), months (m) or years (y), regardless of how many there
+are. If set to \[lq]all\[rq], preserve all snapshots forever. If set
+to \[lq]latest\[rq], preserve latest snapshot. Defaults to
+\[lq]all\[rq].
 .RE
 .PP
-\fBtarget_preserve_weekly\fR  all|<number>
+\fBtarget_preserve\fR  no|<retention_policy>
 .RS 4
-Defines for how many weeks back weekly backups should be
-preserved. Every backup created at \fIpreserve_day_of_week\fR (or
-the next backup in this week if none was made on the exact day) is
-considered as a weekly backup. Defaults to \[lq]0\[rq].
+Set retention policy for backups (see RETENTION POLICY below). If set
+to \[lq]no\[rq], preserve backups according to
+\fItarget_preserve_min\fR only. Defaults to \[lq]no\[rq].
 .RE
 .PP
-\fBtarget_preserve_monthly\fR  all|<number>
+\fBtarget_preserve_min\fR  all|latest|no|<number>{h,d,w,m,y}
 .RS 4
-Defines for how many months back monthly backups should be
-preserved. Every last weekly backup in a month is considered a
-monthly backup. Defaults to \[lq]all\[rq].
+Preserve all backups for a minimum amount of hours (h), days (d),
+weeks (w), months (m) or years (y), regardless of how many there
+are. If set to \[lq]all\[rq], preserve all backups forever. If set to
+\[lq]latest\[rq], always preserve the latest backup (useful in
+conjunction with "target_preserve no", if you want to keep the latest
+backup only). If set to \[lq]no\[rq], only the backups following the
+\fItarget_preserve\fR policy are created. Defaults to \[lq]all\[rq].
 .RE
-.PP
-\fBsnapshot_preserve_daily\fR
-.PD 0
-.PP
-\fBsnapshot_preserve_weekly\fR
-.PP
-\fBsnapshot_preserve_monthly\fR
-.RS 4
-Defines retention policy for the snapshots, with same semantics as the
-\fItarget_preserve_*\fR options.
-.RE
-.PD
 .PP
 \fBpreserve_day_of_week\fR  monday|tuesday|...|sunday
 .RS 4
@@ -204,32 +210,108 @@ cipher_spec" option in ssh(1) for more information. Defaults to
 \[lq]default\[rq] (the ciphers specified in \fIssh_config\fR).
 .RE
 .PP
+\fBrate_limit\fR  <rate>|no
+.RS 4
+Limit the transfer to a maximum of \fI<rate>\fR bytes per second. A
+suffix of "k", "m", "g", or "t" can be added to denote kilobytes
+(*1024), megabytes, and so on. Defaults to \[lq]no\[rq].
+.RE
+.PP
 \fBbtrfs_commit_delete\fR  after|each|no
 .RS 4
 If set, make sure the deletion of snapshot and backup subvolumes are
 committed to disk when btrbk terminates. Defaults to \[lq]no\[rq].
 .RE
 .PP
-\fBbtrfs_progs_compat\fR  yes|no \fI*experimental*\fR
-.RS 4
-Enable compatibility mode for btrfs-progs < 3.17 (\fIbtrfs
---version\fR). This option can be set either globally or within a
-\fItarget\fR section.  If enabled, the latest common snapshots are
-determined by subvolume names instead of \fIreceived_uuid\fR, which
-can lead to false guesses if the snapshot or target subvolumes are
-manipulated by hand (moved, deleted).
-.RE
-.PP
 Lines that contain a hash character (#) in the first column are
 treated as comments.
+.SH RETENTION POLICY
+btrbk uses separate retention policies for snapshots and backups,
+which are defined by the \fIsnapshot_preserve_min\fR,
+\fIsnapshot_preserve\fR, \fItarget_preserve_min\fR,
+\fItarget_preserve\fR, and the \fIpreserve_day_of_week\fR
+configuration options.
+.PP
+Within this section, any statement about "backups" is always valid for
+backups as well as snapshots, referring to \fItarget_preserve\fR or
+\fIsnapshot_preserve\fR respectively.
+.PP
+The format for \fI<retention_policy>\fR is:
+.PP
+.RS 4
+[<hourly>h] [<daily>d] [<weekly>w] [<monthly>m] [<yearly>y]
+.RE
+.PP
+With the following semantics:
+.PP
+.B hourly
+.RS 4
+Defines how many hours back hourly backups should be preserved. The
+first backup of an hour is considered an hourly backup. Note that if
+you use <hourly> scheduling, make sure to also set
+\fItimestamp_format\fR to \[lq]long\[rq] or \[lq]long-iso\[rq], or the
+scheduler will interpret the time as "00:00" (midnight).
+.RE
+.PP
+.B daily
+.RS 4
+Defines how many days back daily backups should be preserved. The
+first backup of a day is considered a daily backup.
+.RE
+.PP
+.B weekly
+.RS 4
+Defines how many weeks back weekly backups should be preserved. The
+first daily backup created at \fIpreserve_day_of_week\fR (or the first
+backup in this week if none was made on the exact day) is considered
+as a weekly backup.
+.RE
+.PP
+.B monthly
+.RS 4
+Defines how many months back monthly backups should be
+preserved. Every first weekly backup in a month is considered a
+monthly backup.
+.RE
+.PP
+.B yearly
+.RS 4
+Defines for how many years back yearly backups should be
+preserved. Every first monthly backup in a year is considered a yearly
+backup.
+.RE
+.PP
+Use an asterisk for \[lq]all\[rq] (e.g. "target_preserve 60d *m"
+states: "preserve daily backups for 60 days back, and all monthly
+backups").
+.PP
+The reference time (which defines the beginning of a day, week, month
+or year) for all date/time calculations is the local time of the host
+running btrbk.
+.PP
+Caveats:
+.IP \[bu] 2
+If you run a setup with several btrbk instances (e.g. one
+snapshot-only instance per remote client, and a separate fetch-only
+instance on the backup server), it makes perfectly sense to run btrbk
+with different local time on the clients, in order to make sure the
+backups from all the remote hosts are preserved for "midnight", and
+not at "00:00 UTC" (which would be "14:00" in Honolulu). If you want
+this behaviour, do NOT use "timestamp_format long-iso".
+.IP \[bu] 2
+If "timestamp_format long-iso" is set, running btrbk from different
+time zones leads to different interpretation of "first in day, week,
+month, or year". Make sure to run btrbk with the same time zone on
+every host, e.g. by setting the TZ environment variable (see
+tzset(3)).
 .SH TARGET TYPES
 .PP
 \fBsend-receive\fR
 .RS 4
 Backup to a btrfs filesystem, using "btrfs send/receive". This is the
 recommended (standard) target type. The \fI<target-directory>\fR must
-be an absolute path and point to a btrfs volume (or subvolume). See
-btrfs-send(8), btrfs-receive(8).
+be an absolute path and point to a btrfs volume (or subvolume), or to
+a directory within a subvolume. See btrfs-send(8), btrfs-receive(8).
 .RE
 .PP
 \fBraw\fR  \fI*experimental*\fR
@@ -282,9 +364,8 @@ There is currently no support for rotation of incremental backups: if
 from time to time in order to be able to delete old backups.
 .RE
 .SH AVAILABILITY
-Please refer to the btrbk project page
-\fBhttp://www.digint.ch/btrbk/\fR for further
-details.
+Please refer to the btrbk project page \fBhttp://digint.ch/btrbk/\fR
+for further details.
 .SH SEE ALSO
 .BR btrbk (1)
 .SH AUTHOR

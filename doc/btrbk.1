@@ -1,4 +1,4 @@
-.TH "btrbk" "1" "2016-02-02" "btrbk v0.22.2" ""
+.TH "btrbk" "1" "2016-04-23" "btrbk v0.23.0" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -11,14 +11,14 @@ btrbk \- backup tool for btrfs volumes
       [\-n|\-\-dry\-run] [\-p|\-\-preserve] [\-r|\-\-resume\-only]
       [\-v|\-\-verbose] [\-q|\-\-quiet] [\-l|\-\-loglevel <level>]
       [\-t|\-\-table] [\-\-format <output\-format>]
-      [\-\-progress]
+      [\-\-progress] [\-\-print\-schedule]
       <command> [<args>]
 .fi
 .SH DESCRIPTION
 \fBbtrbk\fR is a backup tool for btrfs subvolumes, taking advantage of
 btrfs specific capabilities to create atomic snapshots and transfer
-them incrementally to target volumes. It is able to perform backups
-from one source to multiple destinations.
+them incrementally to a target btrfs filesystem. It is able to perform
+backups from one source to multiple destinations.
 .PP
 Snapshots as well as backup subvolume names are created in form:
 .PP
@@ -33,7 +33,7 @@ unless the configuration option \fIsnapshot_name\fR is set. The
 year, "MM" is the month, "DD" is the day, "hh" is the hour and "mm" is
 the minute of the creation time (local time of the host running
 btrbk). If multiple snapshots/backups are created on the same
-date/time, N will be incremented on each backup, starting at 1.
+date/time, N will be incremented on each snapshot, starting at 1.
 .SH OPTIONS
 .PP
 \-h, \-\-help
@@ -61,21 +61,19 @@ Read the configuration from <file>.
 .PP
 \-p, \-\-preserve
 .RS 4
-Preserve all backups. Skips deletion of old backups, even if specified
-in the configuration file.
+Preserve all snapshots and backups. Skips deletion of any snapshots
+and backups, even if specified in the configuration file.
 .RE
 .PP
 \-r, \-\-resume-only
 .RS 4
-Resume only. Skips snapshot creation, only resumes missing
-backups. This only makes sense if the \fIresume_missing\fR option is
-set to \[lq]yes\[rq] in the configuration file.
+Resume only. Skips snapshot creation, only resumes missing backups to
+satisfy the target retention policy.
 .RE
 .PP
 \-v, \-\-verbose
 .RS 4
-Verbose output. Sets "\-l info", and prints detailed scheduler
-information on "run" and "dryrun" commands.
+Verbose output (shortcut for "\-\-loglevel=info").
 .RE
 .PP
 \-q, \-\-quiet
@@ -107,37 +105,54 @@ commands. Useful for further exporting/scripting.
 .RS 4
 Show progress bar on send-receive operation.
 .RE
+.PP
+\-\-print\-schedule
+.RS 4
+Print detailed scheduler information on "run" and "dryrun"
+commands. Use the \fI\-\-format\fR command line option to switch
+between different output formats.
+.RE
+.PP
+\-\-override <config_option>=<value>
+.RS 4
+Override a configuration option <config_option> with <value>.
+Globally, for ALL contexts. Use with care!
+.RE
 .SH COMMANDS
 .PP
 .B run
 [filter...]
 .RS 4
-Perform backup operations as specified in the configuration file. If
-the optional [filter...] arguments are present, backups are only
-performed for the subvolumes/targets matching a \fIFILTER STATEMENT\fR
-(see below).
+Perform snapshot and backup operations as specified in the
+configuration file. If the optional [filter...] arguments are present,
+snapshots and backups are only performed for the subvolumes/targets
+matching a \fIFILTER STATEMENT\fR (see below).
 .PP
 First, btrbk reads information from the source and target btrfs
 filesystems in order to perform sanity checks and identify
 parent/child and received-from relationships.
 .PP
-If the checks succeed, btrbk creates snapshots for all the source
-subvolumes specified in the configuration file.
+If the checks succeed, btrbk creates snapshots for the source
+subvolumes specified in the configuration file, according to the
+\fIsnapshot_create\fR option.
 .PP
 Then, for each specified target, btrbk creates the backups as follows:
-If the \fIresume_missing\fR option is set (the default), btrbk
-transfers all missing snapshots needed to satisfy the configured
-\fItarget_preserve_{daily,weekly,monthly}\fR retention policy, always
-incrementally from the latest common parent subvolume found. If no
-common parent subvolume is found, a full backup is created for the
-first transfer. Note that the latest snapshot (the one created in the
-first step) is always transferred, regardless of the retention policy.
+After comparing the backups to the source snapshots, btrbk transfers
+all missing snapshots needed to satisfy the configured target
+retention policy, incrementally from the latest common parent
+subvolume found. If no common parent subvolume is found (or if the
+\fIincremental\fR option is set to \[lq]no\[rq]), a full
+(non-incremental) backup is created.
 .PP
-As a last step, unless the -p (preserve backups) option is set,
-snapshots and backup subvolumes that are not preserved by their
-configured retention policy will be deleted. Note that the latest
-snapshot as well as the latest backup is always preserved, regardless
-of the retention policy.
+As a last step, unless the \-p (\-\-preserve) option is set, snapshots
+and backup subvolumes that are not preserved by their configured
+retention policy will be deleted. Note that the latest snapshot (the
+one created in the first step) as well as the latest snapshot/backup
+pair are always preserved, regardless of the retention policy.
+.PP
+See section RETENTION POLICY in
+.BR btrbk.conf (5)
+for information on configuring the retention policy.
 .PP
 Use the \fI\-\-format\fR command line option to switch between
 different output formats.
@@ -150,6 +165,29 @@ Don't run any btrfs commands that would alter the filesystem, just
 show the snapshots and backup subvolumes that would be created/deleted
 by the \fBrun\fR command. Use in conjunction with \fI\-l debug\fR to
 see the btrfs commands that would be executed.
+.RE
+.PP
+.B archive
+<source> <target>
+.I *experimental*
+.RS 4
+Recursively copy all subvolumes created by btrbk from <source> to
+<target> directory, optionally rescheduled using
+\fIarchive_preserve_*\fR configuration options. Also creates directory
+tree on <target> (see bugs below). Useful for creating extra archive
+copies (clones) from your backup disks. Note that you can continue
+using btrbk after swapping your backup disk with the archive disk.
+.PP
+Note that this feature needs a \fBlinux kernel >=4.4\fR to work
+correctly! Kernels >=4.1 and <4.4 have a bug when re-sending
+subvolumes (the archived subvolumes will have incorrect received_uuid,
+see <http://thread.gmane.org/gmane.comp.file-systems.btrfs/48798>), so
+make sure you run a recent kernel.
+.PP
+Known bugs: If you want to use nested subvolumes on the target
+filesystem, you need to create them by hand (e.g. by running "btrfs
+subvolume create <target>/dir"). Check the output of --dry-run if
+unsure.
 .RE
 .PP
 .B stats
@@ -176,7 +214,8 @@ All snapshots (and corresponding backups).
 All backups (and corresponding snapshots).
 .TP 11
 .B latest
-Most recent snapshots and backups.
+Most recent common snapshot/backup pair, or most recent snapshot if no
+common found.
 .TP 11
 .B config
 Configured source/snapshot/target relations.
@@ -215,8 +254,9 @@ STATEMENTS\fR below).
 .B origin
 <subvolume>
 .RS 4
-Print origin information for the given backup subvolume, showing the
-parent-child relationship as well as the received-from information.
+Print the subvolume origin tree: Shows the parent-child relationships
+as well as the received-from information. Use the \fI\-\-format\fR
+command line option to switch between different output formats.
 .RE
 .PP
 .B diff
@@ -289,9 +329,8 @@ Backup abort: At least one backup task aborted.
 .IP "255" 4
 Script error.
 .SH AVAILABILITY
-Please refer to the btrbk project page
-\fBhttp://www.digint.ch/btrbk/\fR for further
-details.
+Please refer to the btrbk project page \fBhttp://digint.ch/btrbk/\fR
+for further details.
 .SH SEE ALSO
 .BR btrbk.conf (5),
 .BR btrfs (1)

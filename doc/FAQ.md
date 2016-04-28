@@ -19,7 +19,7 @@ FILTER STATEMENTS), which means you can e.g. add "group automount"
 tags in your configuration and dump only the volumes of this group:
 `btrbk list volume automount`.
 
-  [btrbk(1)]: http://www.digint.ch/btrbk/doc/btrbk.html
+  [btrbk(1)]: http://digint.ch/btrbk/doc/btrbk.html
 
 
 Why is it not possible to backup '/' (btrfs root) ?
@@ -198,7 +198,24 @@ location. In some situations, is is also required to transport the
 data physically, either to the datacenter or to your safe in the
 basement.
 
-### Answer 1: Use external storage as "stream-fifo"
+
+### Answer 1: Use "btrbk archive"
+
+A robust approach is to use external disks as archives (secondary
+backups), and regularly run "btrbk archive" on them. As a nice side
+effect, this also detects possible read-errors on your backup targets
+(Note that a "btrfs scrub" is still more effective for that purpose).
+
+See **btrbk archive** command in [btrbk(1)] for more details.
+
+**Note that kernels >=4.1 and <4.4 have a bug when re-sending
+subvolumes**, make sure you run a recent/patched kernel or step 3 will
+fail. Read
+[this thread on gmane](http://thread.gmane.org/gmane.comp.file-systems.btrfs/48798)
+(the patch provided is confirmed working on kernels 4.2.x and 4.3.x).
+
+
+### Answer 2: Use external storage as "stream-fifo"
 
 This example uses a USB disk as "stream-fifo" for transferring
 (cloning) of btrfs subvolumes:
@@ -216,30 +233,3 @@ This approach has the advantage that you don't need to reformat your
 USB disk. This works fine, but be aware that you may run into trouble
 if a single stream gets corrupted, making all subsequent streams
 unusable.
-
-### Answer 2: Clone btrfs subvolumes
-
-A more robust approach is to use the USB disk as secondary backup.
-This has the advantage that possible errors can already be detected by
-btrfs on the source side:
-
-1. Initialize USB disk:
-
-    `mkfs.btrfs /dev/usbX`
-
-2. For all source subvolumes (in order of generation):
-
-    `btrfs send /source/subvolX -p PARENT | btrfs receive /usbdisk/`
-
-3. At the target location (in order of generation):
-
-    `btrfs send /usbdisk/subvolX -p PARENT | btrfs receive /target`
-
-If you simply want to have a clone of the source disk, skip step 3 and
-store your USB disk in a safe. You will be able to use it for
-restoring backups later, or *as a replacement for your backup disks*.
-
-**Note that kernels >=4.1 have a bug when re-sending subvolumes**,
-make sure you run a patched kernel or step 3 will fail. Read
-[this thread on gmane](http://thread.gmane.org/gmane.comp.file-systems.btrfs/48798)
-(the patch provided is confirmed working on kernels 4.2.x and 4.3).

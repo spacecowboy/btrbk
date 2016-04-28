@@ -13,17 +13,27 @@ policy".
 
 Key Features:
 
-- Atomic snapshots
-- Incremental backups
-- Configurable retention policy
-- Backups to multiple destinations
-- Transfer via ssh
-- Resume of backups (if backup target was not reachable for a while)
-- Encrypted backups to non-btrfs destinations
-- Transaction log
-- Display file changes between two backups
+  * Atomic snapshots
+  * Incremental backups
+  * Configurable retention policy
+  * Backups to multiple destinations
+  * Transfer via ssh
+  * Resume of backups (if backup target was not reachable for a while)
+  * Encrypted backups to non-btrfs destinations
+  * Wildcard subvolumes (useful for docker and lxc containers)
+  * Transaction log
+  * Comprehensive list and statistics output
+  * Resolve and trace btrfs parent-child and received-from relationships
+  * Display file changes between two backups
 
-btrbk is intended to be run as a cron job.
+btrbk is designed to run as a cron job for triggering periodic
+snapshots and backups, as well as from the command line (e.g. for
+instantly creating additional snapshots).
+
+
+###Upgrading from v0.22.2
+
+Please read the [upgrade guide](doc/upgrade_to_v0.23.0.md) if you are updating from btrbk <= v0.22.2.
 
 
 Installation
@@ -33,16 +43,18 @@ btrbk comes as a single executable file (perl script), without the
 need of any installation procedures. If you want the package and
 man-pages properly installed, follow the instructions below.
 
+
 Prerequisites
 -------------
 
-- [btrfs-progs]: Btrfs filesystem utilities (use "btrfs_progs_compat"
-  option for hosts running version prior to v3.17)
-- Perl interpreter: probably already installed on your system
-- [Date::Calc]: Perl module
+  * [btrfs-progs]: Btrfs filesystem utilities >= v3.18.2
+  * [Perl interpreter]: Probably already installed on your system
+  * [OpenSSH]: If you want to tranfer backups from/to remote locations
 
   [btrfs-progs]: http://www.kernel.org/pub/linux/kernel/people/kdave/btrfs-progs/
-  [Date::Calc]:  http://search.cpan.org/perldoc?Date::Calc
+  [Perl interpreter]: https://www.perl.org
+  [OpenSSH]: http://www.openssh.org
+
 
 Instructions
 ------------
@@ -50,11 +62,13 @@ Instructions
 In order to install the btrbk executable along with the man-pages and
 an example configuration file, choose one of the following methods:
 
+
 ### Generic Linux System
 
 Download and unpack the newest stable [btrbk source tarball] and type:
 
     sudo make install
+
 
 ### Gentoo Linux
 
@@ -63,15 +77,18 @@ Grab the digint portage overlay from:
 
     emerge app-backup/btrbk
 
+
 ### Debian Based Distros
 
 btrbk is in `stretch (testing) (utils)`: https://packages.debian.org/stretch/btrbk
 
 Packages are also available via NeuroDebian: http://neuro.debian.net/pkgs/btrbk.html
 
+
 ### Arch Linux
 
 btrbk is in AUR: https://aur.archlinux.org/packages/btrbk/
+
 
 ### Alpine Linux
 
@@ -80,8 +97,7 @@ btrbk is in `testing`, install with:
     apk add btrbk
 
 
-  [btrbk source tarball]: http://www.digint.ch/download/btrbk/releases/
-  [btrbk debian package]: http://www.digint.ch/download/btrbk/packages/debian/
+  [btrbk source tarball]: http://digint.ch/download/btrbk/releases/
 
 
 Synopsis
@@ -90,7 +106,7 @@ Synopsis
 Please consult the [btrbk(1)] man-page provided with this package for a
 full description of the command line options.
 
-  [btrbk(1)]: http://www.digint.ch/btrbk/doc/btrbk.html
+  [btrbk(1)]: http://digint.ch/btrbk/doc/btrbk.html
 
 
 Configuration File
@@ -111,7 +127,7 @@ This will read all btrfs information on the source/target filesystems
 and show what actions would be performed (without writing anything to
 the disks).
 
-  [btrbk.conf(5)]: http://www.digint.ch/btrbk/doc/btrbk.conf.html
+  [btrbk.conf(5)]: http://digint.ch/btrbk/doc/btrbk.conf.html
 
 
 Example: laptop with usb-disk for backups
@@ -119,29 +135,29 @@ Example: laptop with usb-disk for backups
 
 In this example, we assume you have a laptop with:
 
-- a disk having a btrfs volume mounted as `/mnt/btr_pool`, containing
-  a subvolume `rootfs` for the root filesystem and a subvolume `home`
-  for the user data.
-- a backup disk having a btrfs volume mounted as `/mnt/btr_backup`,
-  containing a subvolume `mylaptop` for the incremental backups.
+  * a disk having a btrfs volume mounted as `/mnt/btr_pool`,
+    containing a subvolume `rootfs` for the root filesystem and a
+    subvolume `home` for the user data.
+  * a backup disk having a btrfs volume mounted as `/mnt/btr_backup`,
+    containing a subvolume `mylaptop` for the incremental backups.
 
 Retention policy:
 
-- keep snapshots for 14 days (very handy if you are on the road and
-  the backup disk is not attached)
-- keep monthly backups forever
-- keep weekly backups for 10 weeks
-- keep daily backups for 20 days
+  * keep all snapshots for 2 days, no matter how frequently you (or
+    your cron-job) run btrbk
+  * keep latest daily snapshots for 14 days (very handy if you are on
+    the road and the backup disk is not attached)
+  * keep monthly backups forever
+  * keep weekly backups for 10 weeks
+  * keep daily backups for 20 days
 
 /etc/btrbk/btrbk-mylaptop.conf:
 
-    snapshot_preserve_daily    14
-    snapshot_preserve_weekly   0
-    snapshot_preserve_monthly  0
+    snapshot_preserve_min       2d
+    snapshot_preserve          14d
 
-    target_preserve_daily      20
-    target_preserve_weekly     10
-    target_preserve_monthly    all
+    target_min                 no
+    target_preserve            20d 10w *m
 
     snapshot_dir               btrbk_snapshots
 
@@ -159,12 +175,12 @@ Retention policy:
     exec /usr/sbin/btrbk -q -c /etc/btrbk/btrbk-mylaptop.conf run
 
 
-- This will create snapshots on a daily basis:
-  - `/mnt/btr_pool/btrbk_snapshots/rootfs.YYYYMMDD`
-  - `/mnt/btr_pool/btrbk_snapshots/home.YYYYMMDD`
-- And create incremental backups in:
-  - `/mnt/btr_backup/mylaptop/rootfs.YYYYMMDD`
-  - `/mnt/btr_backup/mylaptop/home.YYYYMMDD`
+  * This will create snapshots on a daily basis:
+    * `/mnt/btr_pool/btrbk_snapshots/rootfs.YYYYMMDD`
+    * `/mnt/btr_pool/btrbk_snapshots/home.YYYYMMDD`
+  * And create incremental backups in:
+    * `/mnt/btr_backup/mylaptop/rootfs.YYYYMMDD`
+    * `/mnt/btr_backup/mylaptop/home.YYYYMMDD`
 
 If you want the snapshots to be created only if the backup disk is
 attached, simply add the following line to the config:
@@ -215,32 +231,36 @@ fileserver, the config would be something like:
 
 This will pull backups from alpha/beta.mydomain.com and locally create:
 
-- `/mnt/btr_backup/alpha/rootfs.YYYYMMDD`
-- `/mnt/btr_backup/alpha/home.YYYYMMDD`
-- `/mnt/btr_backup/beta/rootfs.YYYYMMDD`
-- `/mnt/btr_backup/beta/dbdata.YYYYMMDD`
+  * `/mnt/btr_backup/alpha/rootfs.YYYYMMDD`
+  * `/mnt/btr_backup/alpha/home.YYYYMMDD`
+  * `/mnt/btr_backup/beta/rootfs.YYYYMMDD`
+  * `/mnt/btr_backup/beta/dbdata.YYYYMMDD`
 
 
-Example: local time-machine (daily snapshots)
----------------------------------------------
+Example: local time-machine (hourly snapshots)
+----------------------------------------------
 
 If all you want is to create snapshots of your home directory on a
 regular basis:
 
 /etc/btrbk/btrbk.conf:
 
+    timestamp_format        long
+    snapshot_preserve_min   18h
+    snapshot_preserve       48h 20d 6m
+
     volume /mnt/btr_pool
       snapshot_dir btrbk_snapshots
       subvolume home
 
-/etc/cron.daily/btrbk:
+/etc/cron.hourly/btrbk:
 
     #!/bin/sh
     exec /usr/sbin/btrbk -q run
 
-Note that you can run btrbk more than once a day, e.g. by creating the
-above script in `/etc/cron.hourly/btrbk`, or by calling `sudo btrbk
-run` from the command line.
+Note that you can run btrbk more than once an hour, e.g. by by calling
+`sudo btrbk run` from the command line. With this setup, all those
+extra snapshots will be kept for 18 hours.
 
 
 Example: multiple btrbk instances
@@ -252,23 +272,20 @@ to only fetch the snapshots.
 
 /etc/btrbk/btrbk.conf (on backup server):
 
+    target_preserve_min        no
+    target_preserve            0d 10w *m
+
     volume ssh://192.168.0.42/mnt/btr_pool
       subvolume home
-        snapshot_dir             btrbk_snapshots
-        snapshot_preserve_daily  all
-        snapshot_create          no
-        resume_missing           yes
-
-        target_preserve_daily    0
-        target_preserve_weekly   10
-        target_preserve_monthly  all
+        snapshot_dir           btrbk_snapshots
+        snapshot_preserve_min  all
+        snapshot_create        no
 
         target send-receive  /mnt/btr_backup/my-laptop.com
 
-If the server runs btrbk with this config, the latest snapshot (which
-is *always* transferred), 10 weeklies and all monthlies are received
-from 192.168.0.42. The source filesystem is never altered because of
-`snapshot_preserve_daily all`.
+If the server runs btrbk with this config, 10 weeklies and all
+monthlies are received from 192.168.0.42. The source filesystem is
+never altered because of `snapshot_preserve_min all`.
 
 
 Example: backup from non-btrfs source
@@ -288,14 +305,13 @@ follows:
 
     volume /mnt/btr_backup
       subvolume myhost_sync
-        snapshot_name    myhost
+        snapshot_name           myhost
 
-        snapshot_preserve_daily    14
-        snapshot_preserve_weekly   20
-        snapshot_preserve_monthly  all
+        snapshot_preserve_min   latest
+        snapshot_preserve       14d 20w *m
 
 This will produce daily snapshots `/mnt/btr_backup/myhost.20150101`,
-with retention as defined with the snapshot_preserve_* options.
+with retention as defined with the snapshot_preserve option.
 
 Note that the provided script: "contrib/cron/btrbk-mail" has support
 for this!
@@ -316,24 +332,24 @@ compressed and piped through GnuPG.
 
 /etc/btrbk/btrbk.conf:
 
-    raw_target_compress  xz
-    raw_target_encrypt   gpg
-    gpg_keyring          /etc/btrbk/gpg/pubring.gpg
-    gpg_recipient        btrbk@mydomain.com
+    raw_target_compress   xz
+    raw_target_encrypt    gpg
+    gpg_keyring           /etc/btrbk/gpg/pubring.gpg
+    gpg_recipient         btrbk@mydomain.com
 
     volume /mnt/btr_pool
       subvolume home
         target raw ssh://cloud.example.com/backup
-          ssh_user     btrbk
+          ssh_user  btrbk
           # incremental  no
 
 This will create a GnuPG encrypted, compressed files on the target
 host:
 
-- `/backup/home.YYYYMMDD.btrfs_<received_uuid>.xz.gpg` for
-   non-incremental images,
-- `/backup/home.YYYYMMDD.btrfs_<received_uuid>@<parent_uuid>.xz.gpg`
-  for subsequent incremenal images.
+  * `/backup/home.YYYYMMDD.btrfs_<received_uuid>.xz.gpg` for
+    non-incremental images,
+  * `/backup/home.YYYYMMDD.btrfs_<received_uuid>@<parent_uuid>.xz.gpg`
+    for subsequent incremenal images.
 
 I you are using raw _incremental_ backups, please make sure you
 understand the implications (see [btrbk.conf(5)], TARGET TYPES).
@@ -375,7 +391,7 @@ ssh:
     # example backup target (also allowing deletion of old snapshots)
     command="/backup/scripts/ssh_filter_btrbk.sh -l --target --delete" <pubkey>...
 
-    # example fetch-only backup source (snapshot_preserve_daily=all, snapshot_create=no),
+    # example fetch-only backup source (snapshot_preserve_min=all, snapshot_create=no),
     # restricted to subvolumes within /home or /data
     command="/backup/scripts/ssh_filter_btrbk.sh -l --send -p /home -p /data" <pubkey>...
 
@@ -395,9 +411,10 @@ can setup a chroot environment in /etc/ssh/sshd_config (see
 [sshd_config(5)]).
 
 
-  [ssh_filter_btrbk(1)]: http://www.digint.ch/btrbk/doc/ssh_filter_btrbk.html
+  [ssh_filter_btrbk(1)]: http://digint.ch/btrbk/doc/ssh_filter_btrbk.html
   [sshd(8)]: http://www.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man8/sshd.8
   [sshd_config(5)]: http://www.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man5/sshd_config.5
+
 
 Restoring Backups
 =================
@@ -406,6 +423,7 @@ btrbk does not provide any mechanism to restore your backups, this has
 to be done manually. In the examples below, we assume that you have a
 btrfs volume mounted at `/mnt/btr_pool`, and the subvolume you want to
 have restored is at `/mnt/btr_pool/data`.
+
 
 Example: Restore a Snapshot
 -----------------------------
@@ -487,11 +505,11 @@ Your contributions are welcome!
 
 If you would like to contribute or have found bugs:
 
-- Visit the [btrbk project page on GitHub] and use the [issues
-  tracker] there.
-- Talk to us on Freenode in `#btrbk`.
-- Contact the author via email (the email address can be found in the
-  sources).
+  * Visit the [btrbk project page on GitHub] and use the
+    [issues tracker] there.
+  * Talk to us on Freenode in `#btrbk`.
+  * Contact the author via email (the email address can be found in
+    the sources).
 
 Any feedback is appreciated!
 

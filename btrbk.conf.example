@@ -33,23 +33,21 @@ snapshot_dir               _btrbk_snap
 # creation of non-incremental backups if no parent is found).
 #incremental                yes
 
-# Resume missing backups (set to "no" if you don't want to resume
-# missing backups).
-#resume_missing             yes
-
 # Specify on which day of week weekly/monthly backups are to be
 # preserved.
 #preserve_day_of_week       sunday
 
-# Preserve matrix for source snapshots:
-#snapshot_preserve_daily    all
-#snapshot_preserve_weekly   0
-#snapshot_preserve_monthly  all
+# Preserve all snapshots for a minimum period of time.
+#snapshot_preserve_min      1d
+
+# Retention policy for the source snapshots.
+#snapshot_preserve          <NN>h <NN>d <NN>w <NN>m <NN>y
+
+# Preserve all backup targets for a minimum period of time.
+#target_preserve_min        no
 
 # Preserve matrix for backup targets:
-#target_preserve_daily      all
-#target_preserve_weekly     0
-#target_preserve_monthly    all
+#target_preserve            <NN>h <NN>d <NN>w <NN>m <NN>y
 
 # Specify SSH private key for "ssh://" volumes / targets:
 #ssh_identity               /etc/btrbk/ssh/id_ed25519
@@ -62,10 +60,6 @@ snapshot_dir               _btrbk_snap
 # or "each" to make sure the deletion of subvolumes is committed to
 # disk when btrbk terminates.
 #btrfs_commit_delete        no
-
-# Set this to "yes" to enable btrfs-progs < 3.17 compatibility.
-# Set this either globally or in a specific "target" section.
-#btrfs_progs_compat         no
 
 
 #
@@ -98,14 +92,11 @@ snapshot_dir               _btrbk_snap
 #
 # Example configuration:
 #
-snapshot_preserve_daily    14
-snapshot_preserve_weekly   0
-snapshot_preserve_monthly  0
+snapshot_preserve_min   2d
+snapshot_preserve       14d
 
-target_preserve_daily      20
-target_preserve_weekly     10
-target_preserve_monthly    all
-
+target_preserve_min     no
+target_preserve         20d 10w *m
 
 # Backup to external disk mounted on /mnt/btr_backup
 volume /mnt/btr_pool
@@ -117,9 +108,7 @@ volume /mnt/btr_pool
 
   subvolume  kvm
     # use different preserve matrix for kvm backups
-    target_preserve_daily    7
-    target_preserve_weekly   4
-
+    target_preserve          7d 4w
     target send-receive      /mnt/btr_backup/_btrbk
 
 
@@ -145,7 +134,6 @@ volume ssh://my-remote-host.com/mnt/btr_pool
 volume ssh://my-remote-host.com/mnt/btr_pool
   subvolume home
     snapshot_dir             btrbk_snapshots
-    snapshot_preserve_daily  all
+    snapshot_preserve_min    all
     snapshot_create          no
-    resume_missing           yes
     target send-receive      /mnt/btr_backup/_btrbk/my-remote-host.com
