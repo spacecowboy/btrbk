@@ -1120,13 +1120,14 @@ sub btrfs_qgroup_destroy($@)
     ERROR "Unknown subvolume_id for: $vol->{PRINT}";
     return undef;
   }
+  my $path = $vol->{PATH} // die;
   my $qgroup_id = "0/$vol_id";
   INFO "[qgroup-destroy] qgroup_id: $qgroup_id";
   INFO "[qgroup-destroy] subvolume: $vol->{PRINT}";
   start_transaction($opts{type} // "qgroup_destroy",
                     vinfo_prefixed_keys("target", $vol));
-  my $ret = run_cmd(cmd => [ qw(btrfs qgroup destroy), $qgroup_id, $vol->{PATH} ],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => vinfo_cmd($vol, "btrfs qgroup destroy", $qgroup_id, { unsafe => $path }),
+                    rsh => vinfo_rsh($vol),
                    );
   end_transaction($opts{type} // "delete", ($dryrun ? "DRYRUN" : (defined($ret) ? "success" : "ERROR")));
   ERROR "Failed to destroy qgroup for subvolumes: $vol->{PRINT}" unless(defined($ret));
