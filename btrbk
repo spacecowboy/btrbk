@@ -46,7 +46,7 @@ use Carp qw(confess);
 use Getopt::Long qw(GetOptions);
 use Time::Local qw( timelocal timegm timegm_nocheck );
 
-our $VERSION         = '0.23.3';
+our $VERSION         = '0.24.0';
 our $AUTHOR          = 'Axel Burri <axel@tty0.ch>';
 our $PROJECT_HOME    = '<http://digint.ch/btrbk/>';
 
@@ -57,16 +57,28 @@ my  $VERSION_INFO    = "btrbk command line client, version $VERSION";
 
 my @config_src = ("/etc/btrbk.conf", "/etc/btrbk/btrbk.conf");
 
+my %compression = (
+  # NOTE: also adapt "compress_list" in ssh_filter_btrbk.sh if you change this
+  gzip   => { name => 'gzip',   format => 'gz',  compress_cmd => [ 'gzip',   '-c' ], decompress_cmd => [ 'gzip',   '-d', '-c' ], level_min => 1, level_max => 9 },
+  pigz   => { name => 'pigz',   format => 'gz',  compress_cmd => [ 'pigz',   '-c' ], decompress_cmd => [ 'pigz',   '-d', '-c' ], level_min => 1, level_max => 9, threads => '-p' },
+  bzip2  => { name => 'bzip2',  format => 'bz2', compress_cmd => [ 'bzip2',  '-c' ], decompress_cmd => [ 'bzip2',  '-d', '-c' ], level_min => 1, level_max => 9 },
+  pbzip2 => { name => 'pbzip2', format => 'bz2', compress_cmd => [ 'pbzip2', '-c' ], decompress_cmd => [ 'pbzip2', '-d', '-c' ], level_min => 1, level_max => 9, threads => '-p' },
+  xz     => { name => 'xz',     format => 'xz',  compress_cmd => [ 'xz',     '-c' ], decompress_cmd => [ 'xz',     '-d', '-c' ], level_min => 0, level_max => 9, threads => '-T' },
+  lzo    => { name => 'lzo',    format => 'lzo', compress_cmd => [ 'lzop',   '-c' ], decompress_cmd => [ 'lzop',   '-d', '-c' ], level_min => 1, level_max => 9 },
+  lz4    => { name => 'lz4',    format => 'lz4', compress_cmd => [ 'lz4',    '-c' ], decompress_cmd => [ 'lz4',    '-d', '-c' ], level_min => 1, level_max => 9 },
+ );
+
+my $compress_format_alt = join '|', map { $_->{format} } values %compression; # note: this contains duplicate alternations
 my $ip_addr_match = qr/(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])/;
 my $host_name_match = qr/(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])/;
 my $file_match = qr/[0-9a-zA-Z_@\+\-\.\/]+/;  # note: ubuntu uses '@' in the subvolume layout: <https://help.ubuntu.com/community/btrfs>
 my $glob_match = qr/[0-9a-zA-Z_@\+\-\.\/\*]+/;  # file_match plus '*'
 my $uuid_match = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 my $timestamp_postfix_match = qr/\.(?<YYYY>[0-9]{4})(?<MM>[0-9]{2})(?<DD>[0-9]{2})(T(?<hh>[0-9]{2})(?<mm>[0-9]{2})((?<ss>[0-9]{2})(?<zz>(Z|[+-][0-9]{4})))?)?(_(?<NN>[0-9]+))?/;  # matches "YYYYMMDD[Thhmm[ss+0000]][_NN]"
-my $raw_postfix_match = qr/--(?<received_uuid>$uuid_match)(\@(?<parent_uuid>$uuid_match))?\.btrfs?(\.(?<compress>(gz|bz2|xz)))?(\.(?<encrypt>gpg))?(\.(?<incomplete>part))?/;  # matches ".btrfs_<received_uuid>[@<parent_uuid>][.gz|bz2|xz][.gpg][.part]"
+my $raw_postfix_match = qr/--(?<received_uuid>$uuid_match)(\@(?<parent_uuid>$uuid_match))?\.btrfs?(\.(?<compress>($compress_format_alt)))?(\.(?<encrypt>gpg))?(\.(?<incomplete>part))?/;  # matches ".btrfs_<received_uuid>[@<parent_uuid>][.gz|bz2|xz][.gpg][.part]"
+
 my $group_match = qr/[a-zA-Z0-9_:-]+/;
 my $ssh_cipher_match = qr/[a-z0-9][a-z0-9@.-]+/;
-my $safe_cmd_match = qr/[0-9a-zA-Z_@=\+\-\.\/]+/;  # $file_match plus '=': good enough for our purpose
 
 my %day_of_week_map = ( sunday => 0, monday => 1, tuesday => 2, wednesday => 3, thursday => 4, friday => 5, saturday => 6 );
 my @syslog_facilities = qw( user mail daemon auth lpr news cron authpriv local0 local1 local2 local3 local4 local5 local6 local7 );
@@ -98,14 +110,23 @@ my %config_options = (
   transaction_syslog          => { default => undef,     accept => \@syslog_facilities },
   lockfile                    => { default => undef,     accept_file => { absolute => 1 }, context => [ "root" ] },
 
-  raw_target_compress         => { default => undef,     accept => [ "no", "gzip", "bzip2", "xz" ] },
+  stream_compress             => { default => undef,     accept => [ "no", (keys %compression) ] },
+  stream_compress_level       => { default => "default", accept => [ "default" ], accept_numeric => 1 },
+  stream_compress_threads     => { default => "default", accept => [ "default" ], accept_numeric => 1 },
+
+  raw_target_compress         => { default => undef,     accept => [ "no", (keys %compression) ] },
   raw_target_compress_level   => { default => "default", accept => [ "default" ], accept_numeric => 1 },
   raw_target_compress_threads => { default => "default", accept => [ "default" ], accept_numeric => 1 },
   raw_target_encrypt          => { default => undef,     accept => [ "no", "gpg" ] },
+  raw_target_block_size       => { default => "128K",    accept_regexp => qr/^[0-9]+(kB|k|K|KiB|MB|M|MiB)?$/ },
   gpg_keyring                 => { default => undef,     accept_file => { absolute => 1 } },
   gpg_recipient               => { default => undef,     accept_regexp => qr/^[0-9a-zA-Z_@\+\-\.]+$/ },
 
   group                       => { default => undef,     accept_regexp => qr/^$group_match(\s*,\s*$group_match)*$/, split => qr/\s*,\s*/ },
+
+  backend                     => { default => "btrfs-progs", accept => [       "btrfs-progs", "btrfs-progs-btrbk" ] },
+  backend_local               => { default => undef,         accept => [ "no", "btrfs-progs", "btrfs-progs-btrbk" ] },
+  backend_remote              => { default => undef,         accept => [ "no", "btrfs-progs", "btrfs-progs-btrbk" ] },
 
   snapshot_qgroup_destroy     => { default => undef,     accept => [ "yes", "no" ], context => [ "root", "volume", "subvolume" ] },
   target_qgroup_destroy       => { default => undef,     accept => [ "yes", "no" ] },
@@ -193,6 +214,16 @@ my %table_formats = (
                  },
 );
 
+my %backend_cmd_map = (
+  "btrfs-progs-btrbk" => { "btrfs subvolume list"     => [ "btrfs-subvolume-list"     ],
+                           "btrfs subvolume show"     => [ "btrfs-subvolume-show"     ],
+                           "btrfs subvolume snapshot" => [ "btrfs-subvolume-snapshot" ],
+                           "btrfs subvolume delete"   => [ "btrfs-subvolume-delete"   ],
+                           "btrfs send"               => [ "btrfs-send"               ],
+                           "btrfs receive"            => [ "btrfs-receive"            ],
+                         },
+);
+
 my %url_cache;       # map URL to btr_tree node
 my %fstab_cache;     # map HOST to btrfs mount points
 my %uuid_cache;      # map UUID to btr_tree node
@@ -215,6 +246,7 @@ my $current_transaction;
 my @transaction_log;
 my %config_override;
 my @tm_now;  # current localtime ( sec, min, hour, mday, mon, year, wday, yday, isdst )
+my %warn_once;
 
 
 $SIG{__DIE__} = sub {
@@ -284,6 +316,12 @@ sub DEBUG { my $t = shift; print STDERR "$t\n" if($loglevel >= 3);  }
 sub INFO  { my $t = shift; print STDERR "$t\n" if($loglevel >= 2);  }
 sub WARN  { my $t = shift; print STDERR "WARNING: $t\n" if($loglevel >= 1);  }
 sub ERROR { my $t = shift; print STDERR "ERROR: $t\n";  }
+
+sub WARN_ONCE {
+  my $t = shift;
+  if($warn_once{$t}) { TRACE("WARNING(again): $t"); }
+  else { $warn_once{$t} = 1; WARN($t); }
+}
 
 sub VINFO {
   return undef unless($do_dumper);
@@ -435,16 +473,92 @@ sub check_exe($)
   return 0;
 }
 
-sub safe_cmd($)
+sub compress_cmd($;$)
 {
-  my $aref = shift;
-  foreach(@$aref) {
-    unless(/^$safe_cmd_match$/) {
-      ERROR "Unsafe command `" . join(' ', @$aref) . "` (offending string: \"$_\")";
-      return undef;
+  my $def = shift;
+  my $decompress = shift;
+  return undef unless(defined($def));
+  my $cc = $compression{$def->{key}};
+  my @cmd = $decompress ? @{$cc->{decompress_cmd}} : @{$cc->{compress_cmd}};
+
+  if((not $decompress) && defined($def->{level}) && ($def->{level} ne "default")) {
+    my $level = $def->{level};
+    if($level < $cc->{level_min}) {
+      WARN_ONCE "Compression level capped to minimum for '$cc->{name}': $cc->{level_min}";
+      $level = $cc->{level_min};
+    }
+    if($level > $cc->{level_max}) {
+      WARN_ONCE "Compression level capped to maximum for '$cc->{name}': $cc->{level_max}";
+      $level = $cc->{level_max};
+    }
+    push @cmd, '-' . $level;
+  }
+  if(defined($def->{threads}) && ($def->{threads} ne "default")) {
+    my $thread_opt = $cc->{threads};
+    if($thread_opt) {
+      push @cmd, $thread_opt . $def->{threads};
+    }
+    else {
+      WARN_ONCE "Threading is not supported for '$cc->{name}', ignoring";
     }
   }
-  return 1;
+  return join(' ', @cmd);
+}
+
+sub decompress_cmd($)
+{
+  return compress_cmd($_[0], 1);
+}
+
+
+sub _assemble_cmd($;$)
+{
+  my $cmd_pipe = shift;
+  my $catch_stderr = shift;
+  my $cmd = "";
+
+  # simple single-command
+  if(scalar(@$cmd_pipe) == 1) {
+    $cmd = $cmd_pipe->[0]->{cmd_text};
+    $cmd .= ' 2>&1' if($catch_stderr && $cmd_pipe->[0]->{catch_stderr});
+    return $cmd;
+  }
+
+  # cmd result is something like this:
+  #    { btrfs send <src> 2>&3 | pv | btrfs receive <dst> 2>&3 ; } 3>&1
+  my $pipe = "";
+  $cmd = "{ " if($catch_stderr);
+  foreach (@$cmd_pipe) {
+    if($_->{cmd_text} =~ /^>/) {
+      die unless($pipe);
+      $cmd .= ' ' . $_->{cmd_text};
+      $pipe = undef; # this dies if it is not last command
+    } else {
+      $cmd .= $pipe . $_->{cmd_text};
+      $cmd .= ' 2>&3' if($catch_stderr && $_->{catch_stderr});
+      $pipe = ' | ';
+    }
+  }
+  $cmd .= ' ; } 3>&1' if($catch_stderr);
+
+  return $cmd;
+}
+
+sub _safe_cmd($$)
+{
+  # NOTE: this function alters $aref: hashes of form: "{ unsafe => 'string' }" get translated to "string"
+  my $aref = shift;
+  my $offending = shift;
+  foreach(@$aref) {
+    if(ref($_) eq 'HASH') {
+      $_ = $_->{unsafe};  # replace in-place
+      # NOTE: all files must be absolute
+      unless(defined(check_file($_, { absolute => 1 }))) {
+        push @$offending, "\"$_\"";
+      }
+    }
+  }
+  return join(' ', @$aref);
 }
 
 sub run_cmd(@)
@@ -453,46 +567,102 @@ sub run_cmd(@)
   # this needs some redirection magic for filter_stderr to work.
   # NOTE: multiple filters are not supported!
 
-  my @commands = (ref($_[0]) eq "HASH") ? @_ : { @_ };
-  die unless(scalar(@commands));
+  my @cmd_pipe_in = (ref($_[0]) eq "HASH") ? @_ : { @_ };
+  die unless(scalar(@cmd_pipe_in));
   $err = "";
 
   my $destructive = 0;
   my $catch_stderr = 0;
   my $filter_stderr = undef;
-  foreach (@commands) {
-    $_->{rsh} //= [];
-    $_->{cmd} = [ @{$_->{rsh}}, @{$_->{cmd}} ];
-    return undef unless(safe_cmd($_->{cmd}));
-    $_->{cmd_text} = join(' ', map { "'$_'" } @{$_->{cmd}});
-    $catch_stderr = 1 if($_->{catch_stderr});
-    $filter_stderr = $_->{filter_stderr} if($_->{filter_stderr});  # NOTE: last filter wins!
-    $destructive = 1 unless($_->{non_destructive});
-  }
-  my $cmd_print = join(' | ', map { $_->{cmd_text} } @commands);
+  my @cmd_pipe;
+  my @unsafe_cmd;
+  my $compressed = undef;
 
-  my $cmd = $cmd_print;
-  if($catch_stderr) {
-    if(scalar(@commands) == 1) {
-      # no pipes, simply redirect stderr to stdout
-      $cmd .= ' 2>&1';
+  foreach my $href (@cmd_pipe_in)
+  {
+    die if(defined($href->{cmd_text}));
+
+    $catch_stderr = 1 if($href->{catch_stderr});
+    $filter_stderr = $href->{filter_stderr} if($href->{filter_stderr});  # NOTE: last filter wins!
+    $destructive = 1 unless($href->{non_destructive});
+
+    if($href->{check_unsafe}) {
+      _safe_cmd($href->{check_unsafe}, \@unsafe_cmd);
     }
-    else
-    {
-      # pipe chain is more complicated, result is something like this:
-      #    { btrfs send <src> 2>&3 | pv | btrfs receive <dst> 2>&3 ; } 3>&1
-      $cmd = "{ ";
-      my $pipe = "";
-      foreach (@commands) {
-        $cmd .= $pipe . $_->{cmd_text};
-        $cmd .= ' 2>&3' if($_->{catch_stderr});
-        $pipe = ' | ';
+
+    if($href->{compress}) {
+      if($compressed && ($compression{$compressed->{key}}->{format} ne $compression{$href->{compress}->{key}}->{format})) {
+        push @cmd_pipe, { cmd_text => decompress_cmd($compressed) };
+        $compressed = undef;
       }
-      $cmd .= ' ; } 3>&1';
+      unless($compressed) {
+        push @cmd_pipe, { cmd_text => compress_cmd($href->{compress}) };
+        $compressed = $href->{compress};
+      }
+    }
+    else {
+      if($href->{redirect_to_file}) {
+        $href->{cmd_text} = _safe_cmd([ '>', $href->{redirect_to_file} ], \@unsafe_cmd);
+      }
+      elsif($href->{cmd}) {
+        $href->{cmd_text} = _safe_cmd($href->{cmd}, \@unsafe_cmd);
+      }
+      return undef unless(defined($href->{cmd_text}));
+
+      if($href->{rsh}) {
+        my @rsh_cmd_pipe = ( $href );
+
+        if($href->{rsh_compress_in}) {
+          if($compressed && ($compression{$compressed->{key}}->{format} ne $compression{$href->{rsh_compress_in}->{key}}->{format}))
+          {
+            push @cmd_pipe, { cmd_text => decompress_cmd($compressed) };
+            $compressed = undef;
+          }
+          unless($compressed) {
+            push @cmd_pipe, { cmd_text => compress_cmd($href->{rsh_compress_in}) };
+            $compressed = $href->{rsh_compress_in};
+          }
+        }
+
+        if($compressed && (not ($href->{compressed_ok}))) {
+          unshift @rsh_cmd_pipe, { cmd_text => decompress_cmd($compressed) };
+          $compressed = undef;
+        }
+
+        if($href->{rsh_compress_out}) {
+          die if($href->{redirect_to_file});
+          push @rsh_cmd_pipe, { cmd_text => compress_cmd($href->{rsh_compress_out}) };
+          $compressed = $href->{rsh_compress_out};
+        }
+
+        if((scalar(@rsh_cmd_pipe) == 1) && ($rsh_cmd_pipe[0]->{redirect_to_file})) {
+          # NOTE: direct redirection in ssh command does not work: "ssh '> outfile'"
+          # we need to assemble: "ssh 'cat > outfile'"
+          unshift @rsh_cmd_pipe, { cmd_text => 'cat' };
+        }
+
+        my $rsh_text = _safe_cmd($href->{rsh}, \@unsafe_cmd);
+        return undef unless(defined($rsh_text));
+        $href->{cmd_text} = $rsh_text . " '" . _assemble_cmd(\@rsh_cmd_pipe) . "'";
+      }
+      else {
+        if($compressed && (not ($href->{compressed_ok}))) {
+          push @cmd_pipe, { cmd_text => decompress_cmd($compressed) };
+          $compressed = undef;
+        }
+      }
+      push @cmd_pipe, $href;
     }
   }
 
-  # hide redirection magic from debug output
+  my $cmd = _assemble_cmd(\@cmd_pipe, $catch_stderr);
+  my $cmd_print = _assemble_cmd(\@cmd_pipe);    # hide redirection magic from debug output
+
+  if(scalar(@unsafe_cmd)) {
+    ERROR "Unsafe command `$cmd_print` (offending string: " . join(', ', @unsafe_cmd) . ')';
+    return undef;
+  }
+
   if($dryrun && $destructive) {
     DEBUG "### (dryrun) $cmd_print";
     return "";
@@ -532,22 +702,14 @@ sub add_pv_command($@)
 
   if($opts{show_progress}) {
     if($rate_limit) {
-      push @$cmd_pipe, { cmd => [ 'pv', '-trab', '-L', $rate_limit ] };
+      push @$cmd_pipe, { cmd => [ 'pv', '-trab', '-L', $rate_limit ], compressed_ok => 1 };
     } else {
-      push @$cmd_pipe, { cmd => [ 'pv', '-trab' ] };
+      push @$cmd_pipe, { cmd => [ 'pv', '-trab' ], compressed_ok => 1 };
     }
   }
   elsif($rate_limit) {
-    push @$cmd_pipe, { cmd => [ 'pv', '-q', '-L', $rate_limit ] };
+    push @$cmd_pipe, { cmd => [ 'pv', '-q', '-L', $rate_limit ], compressed_ok => 1 };
   }
-}
-
-
-sub btrfs_filesystem_show_all_local()
-{
-  return run_cmd( cmd => [ qw(btrfs filesystem show) ],
-                  non_destructive => 1
-                 );
 }
 
 
@@ -555,8 +717,8 @@ sub btrfs_filesystem_show($)
 {
   my $vol = shift || die;
   my $path = $vol->{PATH} // die;
-  return run_cmd( cmd => [ qw(btrfs filesystem show), $path ],
-                  rsh => $vol->{RSH},
+  return run_cmd( cmd => vinfo_cmd($vol, "btrfs filesystem show", { unsafe => $path } ),
+                  rsh => vinfo_rsh($vol),
                   non_destructive => 1
                  );
 }
@@ -566,8 +728,8 @@ sub btrfs_filesystem_df($)
 {
   my $vol = shift || die;
   my $path = $vol->{PATH} // die;
-  return run_cmd( cmd => [qw(btrfs filesystem df), $path],
-                  rsh => $vol->{RSH},
+  return run_cmd( cmd => vinfo_cmd($vol, "btrfs filesystem df", { unsafe => $path }),
+                  rsh => vinfo_rsh($vol),
                   non_destructive => 1
                  );
 }
@@ -577,8 +739,8 @@ sub btrfs_filesystem_usage($)
 {
   my $vol = shift || die;
   my $path = $vol->{PATH} // die;
-  my $ret = run_cmd( cmd => [ qw(btrfs filesystem usage), $path ],
-                     rsh => $vol->{RSH},
+  my $ret = run_cmd( cmd => vinfo_cmd($vol, "btrfs filesystem usage", { unsafe => $path } ),
+                     rsh => vinfo_rsh($vol),
                      non_destructive => 1
                     );
   return undef unless(defined($ret));
@@ -633,8 +795,8 @@ sub btrfs_subvolume_show($)
 {
   my $vol = shift || die;
   my $path = $vol->{PATH} // die;
-  my $ret = run_cmd(cmd => [ qw(btrfs subvolume show), $path],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => vinfo_cmd($vol, "btrfs subvolume show", { unsafe => $path }),
+                    rsh => vinfo_rsh($vol),
                     non_destructive => 1,
                     catch_stderr => 1, # hack for shell-based run_cmd()
                     filter_stderr => sub {
@@ -660,7 +822,7 @@ sub btrfs_subvolume_show($)
   my $real_path;
   if($ret =~ /^($file_match)/) {
     $real_path = $1;
-    $real_path = check_file($real_path, { absolute => 1 });
+    $real_path = check_file($real_path, { absolute => 1 }, sanitize => 1);
     return undef unless(defined($real_path));
     DEBUG "Real path for subvolume \"$vol->{PRINT}\" is: $real_path" if($real_path ne $path);
     $realpath_cache{$vol->{URL}} = $real_path if($real_path ne $path);
@@ -669,20 +831,19 @@ sub btrfs_subvolume_show($)
     $real_path = $path;
     WARN "No real path provided by \"btrfs subvolume show\" for subvolume \"$vol->{PRINT}\", using: $path";
   }
-  my %detail = ( REAL_PATH  => $real_path );
 
+  my %detail;
   if($ret =~ /^\Q$real_path\E is (btrfs root|toplevel subvolume)/) {
     # btrfs-progs <  4.4 prints: "<subvol> is btrfs root"
     # btrfs-progs >= 4.4 prints: "<subvol> is toplevel subvolume"
-    DEBUG "found btrfs root: $vol->{PRINT}";
-    $detail{id}      = 5;
-    $detail{is_root} = 1;
+    # btrfs-progs >= 4.8.3 does not enter here, as output shares format with regular subvolumes
+    $detail{id} = 5;
   }
   elsif($ret =~ /^\Q$real_path\E/) {
     TRACE "btr_detail: found btrfs subvolume: $vol->{PRINT}";
     # NOTE: received_uuid is not required here, as btrfs-progs < 4.1 does not give us that information.
     #       no worries, we get this from btrfs_subvolume_list() for all subvols.
-    my @required_keys = qw(name uuid parent_uuid id gen cgen top_level);
+    my @required_keys = qw(name uuid parent_uuid id gen cgen top_level readonly);
     my %trans = (
       "Name"                  => "name",
       "uuid"                  => "uuid",
@@ -712,6 +873,10 @@ sub btrfs_subvolume_show($)
       }
     }
     DEBUG "Parsed " . scalar(keys %detail) . " subvolume detail items: $vol->{PRINT}";
+
+    # NOTE: as of btrfs-progs v4.6.1, flags are either "-" or "readonly"
+    $detail{readonly} = ($detail{flags} =~ /readonly/) ? 1 : 0;
+
     VINFO(\%detail, "detail") if($loglevel >=4);
     foreach(@required_keys) {
       unless(defined($detail{$_})) {
@@ -724,6 +889,17 @@ sub btrfs_subvolume_show($)
     ERROR "Failed to parse subvolume detail (unsupported btrfs-progs) for: $vol->{PRINT}";
     return undef;
   }
+
+  if($detail{id} == 5) {
+    # NOTE: as of btrfs-progs v4.8.3, we get full output for root
+    # subvolume, with lots of '0' and '-' (especially uuid='-').
+    # This breaks things, set $detail to sane values:
+    DEBUG "found btrfs root: $vol->{PRINT}";
+    %detail = ( id => 5, is_root => 1 );
+  }
+
+  $detail{REAL_PATH} = $real_path;
+
   return \%detail;
 }
 
@@ -733,8 +909,8 @@ sub btrfs_subvolume_list_readonly_flag($)
   my $vol = shift || die;
   my $path = $vol->{PATH} // die;
 
-  my $ret = run_cmd(cmd => [ qw(btrfs subvolume list), '-a', '-r', $path ],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => vinfo_cmd($vol, "btrfs subvolume list", '-a', '-r', { unsafe => $path } ),
+                    rsh => vinfo_rsh($vol),
                     non_destructive => 1,
                    );
   return undef unless(defined($ret));
@@ -762,8 +938,8 @@ sub btrfs_subvolume_list($;@)
   # NOTE: Support for btrfs-progs <= 3.17 has been dropped in
   #       btrbk-0.23, the received_uuid flag very essential!
   my @display_options = ('-c', '-u', '-q', '-R');
-  my $ret = run_cmd(cmd => [ qw(btrfs subvolume list), @filter_options, @display_options, $path ],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => vinfo_cmd($vol, "btrfs subvolume list", @filter_options, @display_options, { unsafe => $path } ),
+                    rsh => vinfo_rsh($vol),
                     non_destructive => 1,
                    );
   return undef unless(defined($ret));
@@ -823,8 +999,8 @@ sub btrfs_subvolume_find_new($$;$)
   my $vol = shift || die;
   my $path = $vol->{PATH} // die;
   my $lastgen = shift // die;
-  my $ret = run_cmd(cmd => [ qw(btrfs subvolume find-new), $path, $lastgen ],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => vinfo_cmd($vol, "btrfs subvolume find-new", { unsafe => $path }, $lastgen ),
+                    rsh => vinfo_rsh($vol),
                     non_destructive => 1,
                    );
   unless(defined($ret)) {
@@ -890,8 +1066,8 @@ sub btrfs_subvolume_snapshot($$)
                     vinfo_prefixed_keys("target", $target_vol),
                     vinfo_prefixed_keys("source", $svol),
                    );
-  my $ret = run_cmd(cmd => [ qw(btrfs subvolume snapshot), '-r', $src_path, $target_path ],
-                    rsh => $svol->{RSH},
+  my $ret = run_cmd(cmd => vinfo_cmd($svol, "btrfs subvolume snapshot", '-r', { unsafe => $src_path }, { unsafe => $target_path } ),
+                    rsh => vinfo_rsh($svol),
                    );
   end_transaction("snapshot", ($dryrun ? "DRYRUN" : (defined($ret) ? "success" : "ERROR")));
   unless(defined($ret)) {
@@ -910,23 +1086,24 @@ sub btrfs_subvolume_delete($@)
   die if($commit && ($commit ne "after") && ($commit ne "each"));
   $targets = [ $targets ] unless(ref($targets) eq "ARRAY");
   return 0 unless(scalar(@$targets));
-  my $rsh = $targets->[0]->{RSH};
+
+  # assert all targets share same HOST
+  # NOTE: rsh and backend command is taken from first target
   my $rsh_host_check = $targets->[0]->{HOST} || "";
   foreach (@$targets) {
-    # make sure all targets share same HOST
-    my $host = $_->{HOST} || "";
-    die if($rsh_host_check ne $host);
+    die if($rsh_host_check ne ($_->{HOST} || ""));
   }
+
   INFO "[delete] options: commit-$commit" if($commit);
   INFO "[delete] target: $_->{PRINT}" foreach(@$targets);
   my @options;
   @options = ("--commit-$commit") if($commit);
-  my @target_paths = map( { $_->{PATH} } @$targets);
   start_transaction($opts{type} // "delete",
                     map( { { vinfo_prefixed_keys("target", $_) }; } @$targets)
                    );
-  my $ret = run_cmd(cmd => [ qw(btrfs subvolume delete), @options, @target_paths ],
-                    rsh => $rsh,
+  my @cmd_target_paths = map { { unsafe => $_->{PATH} } } @$targets;
+  my $ret = run_cmd(cmd => vinfo_cmd($targets->[0], "btrfs subvolume delete", @options, @cmd_target_paths ),
+                    rsh => vinfo_rsh($targets->[0]),
                    );
   end_transaction($opts{type} // "delete", ($dryrun ? "DRYRUN" : (defined($ret) ? "success" : "ERROR")));
   ERROR "Failed to delete btrfs subvolumes: " . join(' ', map( { $_->{PRINT} } @$targets)) unless(defined($ret));
@@ -979,22 +1156,24 @@ sub btrfs_send_receive($$$$;@)
 
   my @send_options;
   my @receive_options;
-  push(@send_options, '-p', $parent_path) if($parent_path);
+  push(@send_options, '-p', { unsafe => $parent_path} ) if($parent_path);
   # push(@send_options, '-v') if($loglevel >= 3);
   # push(@receive_options, '-v') if($loglevel >= 3);
 
   my @cmd_pipe;
   push @cmd_pipe, {
-    cmd => [ qw(btrfs send), @send_options, $snapshot_path ],
-    rsh => $snapshot->{RSH},
+    cmd => vinfo_cmd($snapshot, "btrfs send", @send_options, { unsafe => $snapshot_path } ),
+    rsh => vinfo_rsh($snapshot, disable_compression => config_compress_hash($snapshot, "stream_compress")),
+    rsh_compress_out => config_compress_hash($snapshot, "stream_compress"),
     name => "btrfs send",
     catch_stderr => 1, # hack for shell-based run_cmd()
   };
   add_pv_command(\@cmd_pipe, show_progress => $show_progress, rate_limit => $opts{rate_limit});
   push @cmd_pipe, {
-    cmd => [ qw(btrfs receive), @receive_options, $target_path . '/' ],
-    rsh => $target->{RSH},
+    cmd => vinfo_cmd($target, "btrfs receive", @receive_options, { unsafe => $target_path . '/' } ),
+    rsh => vinfo_rsh($target, disable_compression => config_compress_hash($target, "stream_compress")),
     name => "btrfs receive",
+    rsh_compress_in => config_compress_hash($target, "stream_compress"),
     catch_stderr => 1, # hack for shell-based run_cmd()
     filter_stderr => sub { $err = $_; $_ = undef }
   };
@@ -1026,8 +1205,53 @@ sub btrfs_send_receive($$$$;@)
     }
   }
 
-  end_transaction("send-receive", ($dryrun ? "DRYRUN" : ($send_receive_error ? "ERROR" : "success")));
+  unless($send_receive_error) {
+    # Read in target subvolume metadata (btrfs subvolume show):
+    # Double checking the output increases robustness against exotic
+    # revisions of external commands (btrfs-progs, pv, xz, lz4, ...).
+    #
+    # NOTE: we cannot rely on the underlying shell to have
+    # "pipefail" functionality.
+    #
+    # NOTE (bug?) (checked with btrfs-progs v4.6.1 and earlier):
+    # "cat /dev/null | btrfs receive" returns with exitcode=0 and no
+    # error message, having the effect that silently no subvolume is
+    # created if any command in @cmd_pipe fail.
 
+    if($dryrun) {
+      INFO "[send/receive] (dryrun, skip) checking target metadata: $vol_received->{PRINT}";
+    }
+    else {
+      INFO "[send/receive] checking target metadata: $vol_received->{PRINT}";
+      my $detail = btrfs_subvolume_show($vol_received);
+      if(defined($detail)) {
+        # plausibility checks on target detail
+        unless($detail->{readonly}) {
+          ERROR "[send/receive] target is not readonly: $vol_received->{PRINT}";
+          $send_receive_error = 1;
+        }
+        if($detail->{received_uuid} && ($detail->{received_uuid} eq '-')) {
+          # NOTE: received_uuid is not in @required_keys (needs btrfs-progs >= 4.1 (BTRFS_PROGS_MIN))
+          # so we only check it if it's really present
+          ERROR "[send/receive] received_uuid is not set on target: $vol_received->{PRINT}";
+          $send_receive_error = 1;
+        }
+        if($parent && ($detail->{parent_uuid} eq '-')) {
+          ERROR "[send/receive] parent_uuid is not set on target: $vol_received->{PRINT}";
+          $send_receive_error = 1;
+        }
+        if((not $parent) && ($detail->{parent_uuid} ne '-')) {
+          ERROR "[send/receive] parent_uuid is set on target: $vol_received->{PRINT}";
+          $send_receive_error = 1;
+        }
+      }
+      else {
+        $send_receive_error = 1;
+      }
+    }
+  }
+
+  end_transaction("send-receive", ($dryrun ? "DRYRUN" : ($send_receive_error ? "ERROR" : "success")));
 
   if($send_receive_error) {
     ERROR "Failed to send/receive btrfs subvolume: $snapshot->{PRINT} " . ($parent_path ? "[$parent_path]" : "") . " -> $target->{PRINT}";
@@ -1070,66 +1294,51 @@ sub btrfs_send_to_file($$$$;@)
   $target_filename .= '@' . $parent_uuid if($parent_uuid);
   $target_filename .= ".btrfs";
 
-  my %compress = ( gzip  => { name => 'gzip' , cmd => [ 'gzip'  ], postfix => '.gz',  level_min => 1, level_max => 9 },
-                   bzip2 => { name => 'bzip2', cmd => [ 'bzip2' ], postfix => '.bz2', level_min => 1, level_max => 9 },
-                   xz    => { name => 'xz'   , cmd => [ 'xz'    ], postfix => '.xz',  level_min => 0, level_max => 9, threads => '--threads=' },
-                  );
-
   my @send_options;
   push(@send_options, '-v') if($loglevel >= 3);
   push(@send_options, '-p', $parent_path) if($parent_path);
 
   my @cmd_pipe;
   push @cmd_pipe, {
-    cmd => [ qw(btrfs send), @send_options, $source_path ],
-    rsh => $source->{RSH},
+    cmd => vinfo_cmd($source, "btrfs send", @send_options, { unsafe => $source_path } ),
+    rsh => vinfo_rsh($source, disable_compression => $opts{compress} || config_compress_hash($source, "stream_compress")),
     name => "btrfs send",
+    rsh_compress_out => $opts{compress} || config_compress_hash($source, "stream_compress"),
   };
   add_pv_command(\@cmd_pipe, show_progress => $show_progress, rate_limit => $opts{rate_limit});
   if($opts{compress}) {
-    die unless($compress{$opts{compress}});
-    $target_filename .= $compress{$opts{compress}}->{postfix};
-    my $compress_cmd = $compress{$opts{compress}}->{cmd};
-    if(defined($opts{compress_level}) && ($opts{compress_level} ne "default")) {
-      my $compress_level = $opts{compress_level};
-      if($compress_level < $compress{$opts{compress}}->{level_min}) {
-        WARN "Compression level (raw_target_compress_level) capped to minimum for '$opts{compress}': $compress{$opts{compress}}->{level_min}";
-        $compress_level = $compress{$opts{compress}}->{level_min};
-      }
-      if($compress_level > $compress{$opts{compress}}->{level_max}) {
-        WARN "Compression level (raw_target_compress_level) capped to maximum for '$opts{compress}': $compress{$opts{compress}}->{level_max}";
-        $compress_level = $compress{$opts{compress}}->{level_max};
-      }
-      push @$compress_cmd, '-' . $compress_level;
-    }
-    if(defined($opts{compress_threads}) && ($opts{compress_threads} ne "default")) {
-      my $thread_opt = $compress{$opts{compress}}->{threads};
-      if($thread_opt) {
-        push @$compress_cmd, $thread_opt . $opts{compress_threads};
-      }
-      else {
-        WARN "Threading (raw_target_compress_threads) is not supported for '$opts{compress}', ignoring";
-      }
-    }
-    push @cmd_pipe, { cmd => $compress_cmd,
-                      name => $compress{$opts{compress}}->{name}
-                     };
+    $target_filename .= '.' . $compression{$opts{compress}->{key}}->{format};
+    push @cmd_pipe, { compress => $opts{compress} }; # does nothing if already compressed by rsh_compress_out
   }
   if($opts{encrypt}) {
     die unless($opts{encrypt}->{type} eq "gpg");
     $target_filename .= '.gpg';
     my @gpg_options = ( '--batch', '--no-tty', '--trust-model', 'always' );
+    push @gpg_options, ( '--compress-algo', 'none' ) if($opts{compress});  # NOTE: if --compress-algo is not set, gpg might still compress according to OpenPGP standard.
     push(@gpg_options, ( '--no-default-keyring', '--keyring', $opts{encrypt}->{keyring} )) if($opts{encrypt}->{keyring});
     push(@gpg_options, ( '--default-recipient', $opts{encrypt}->{recipient} )) if($opts{encrypt}->{recipient});
     push @cmd_pipe, {
       cmd => [ 'gpg', @gpg_options, '--encrypt' ],
       name => 'gpg',
+      compressed_ok => ($opts{compress} ? 1 : 0),
     };
   }
   push @cmd_pipe, {
-    cmd => [ 'dd', 'status=none', "of=${target_path}/${target_filename}.part" ],
-    rsh => $target->{RSH},
-    name => 'dd',
+    # NOTE: We use "dd" instead of shell redirections here, as it is
+    # common to have special filesystems (like NFS, SMB, FUSE) mounted
+    # on $target_path. By using "dd" we make sure to write in
+    # reasonably large blocks (default=128K), which is not always the
+    # case when using redirections (e.g. "gpg > outfile" writes in 8K
+    # blocks).
+    # Another approach would be to always pipe through "cat", which
+    # uses st_blksize from fstat(2) (with a minimum of 128K) to
+    # determine the block size.
+    cmd => [ 'dd', 'status=none', 'bs=' . config_key($target, "raw_target_block_size"), "of=${target_path}/${target_filename}.part" ],
+    check_unsafe => [ { unsafe => "${target_path}/${target_filename}.part" } ],
+    #redirect_to_file => { unsafe => "${target_path}/${target_filename}.part" },  # alternative (use shell redirection), less overhead on local filesystems (barely measurable):
+    rsh => vinfo_rsh($target, disable_compression => $opts{compress} || config_compress_hash($target, "stream_compress")),
+    rsh_compress_in => $opts{compress} || config_compress_hash($target, "stream_compress"),
+    compressed_ok => ($opts{compress} ? 1 : 0),
   };
 
   my $vol_received = vinfo_child($target, $target_filename);
@@ -1149,18 +1358,19 @@ sub btrfs_send_to_file($$$$;@)
   my $ret = run_cmd(@cmd_pipe);
   if(defined($ret)) {
     # Test target file for "exists and size > 0" after writing,
-    # as we can not rely on the exit status of 'dd'
+    # as we can not rely on the exit status of the command pipe,
+    # and the shell command always creates the target file.
     DEBUG "Testing target file (non-zero size): $target->{PRINT}.part";
     $ret = run_cmd({
-      cmd  => ['test', '-s', "${target_path}/${target_filename}.part"],
-      rsh  => $target->{RSH},
+      cmd  => ['test', '-s', { unsafe => "${target_path}/${target_filename}.part" } ],
+      rsh  => vinfo_rsh($target),
       name => "test",
     });
     if(defined($ret)) {
       DEBUG "Renaming target file (remove postfix '.part'): $target->{PRINT}";
       $ret = run_cmd({
-        cmd  => ['mv', "${target_path}/${target_filename}.part", "${target_path}/${target_filename}"],
-        rsh  => $target->{RSH},
+        cmd  => ['mv', { unsafe => "${target_path}/${target_filename}.part" }, { unsafe => "${target_path}/${target_filename}" } ],
+        rsh  => vinfo_rsh($target),
         name => "mv",
       });
     }
@@ -1179,7 +1389,7 @@ sub system_list_mounts($)
   my $vol = shift // die;
   my $file = '/proc/self/mounts';
   my $ret = run_cmd(cmd => [ qw(cat), $file ],
-                    rsh => $vol->{RSH},
+                    rsh => vinfo_rsh($vol),
                     non_destructive => 1,
                     catch_stderr => 1, # hack for shell-based run_cmd()
                    );
@@ -1222,8 +1432,8 @@ sub system_realpath($)
 
   my $path = $vol->{PATH} // die;;
   my @quiet = ($loglevel < 3) ? ('-q') : ();
-  my $ret = run_cmd(cmd => [ qw(readlink), '-e', @quiet, $path ],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => [ qw(readlink), '-e', @quiet, { unsafe => $path } ],
+                    rsh => vinfo_rsh($vol),
                     non_destructive => 1,
                    );
   return undef unless(defined($ret));
@@ -1243,8 +1453,8 @@ sub system_mkdir($)
   my $vol = shift // die;
   my $path = $vol->{PATH} // die;;
   INFO "Creating directory: $vol->{PRINT}/";
-  my $ret = run_cmd(cmd => [ qw(mkdir), '-p', $path ],
-                    rsh => $vol->{RSH},
+  my $ret = run_cmd(cmd => [ qw(mkdir), '-p', { unsafe => $path } ],
+                    rsh => vinfo_rsh($vol),
                    );
   action("mkdir",
          vinfo_prefixed_keys("target", $vol),
@@ -1510,97 +1720,108 @@ sub vinfo($;$)
 
   my ($url_prefix, $path) = check_url($url);
   die "invalid url: $url" unless(defined($path));
+  my $print = $path;
   my $name = $path;
   $name =~ s/^.*\///;
   $name = '/' if($name eq "");
 
-  %info = (
-    URL        => $url_prefix . $path,
+  my $host = undef;
+  if($url_prefix) {
+    $host = $url_prefix;
+    die unless($host =~ s/^ssh:\/\///);
+    $print = "$host:$path";
+  }
+
+  return {
+    HOST       => $host,
     NAME       => $name,
     PATH       => $path,
-    PRINT      => $path,
+    PRINT      => $print,
+    URL        => $url_prefix . $path,
     URL_PREFIX => $url_prefix,
-   );
-
-  if($url_prefix) {
-    my $host = $url_prefix;
-    die unless($host =~ s/^ssh:\/\///);
-
-    %info = (
-      %info,
-      HOST     => $host,
-      PRINT    => "$host:$path",
-      RSH_TYPE => "UNKNOWN",
-      RSH      => [ '/bin/false' ],
-     );
-    if($config) {
-      my $ssh_port        = config_key($config, "ssh_port");
-      my $ssh_user        = config_key($config, "ssh_user");
-      my $ssh_identity    = config_key($config, "ssh_identity");
-      my $ssh_compression = config_key($config, "ssh_compression");
-      my $ssh_cipher_spec = config_key($config, "ssh_cipher_spec") // "default";
-      my @ssh_options;
-      push(@ssh_options, '-p', $ssh_port) if($ssh_port ne "default");
-      push(@ssh_options, '-C') if($ssh_compression);
-      push(@ssh_options, '-c', $ssh_cipher_spec) if($ssh_cipher_spec ne "default");
-      if($ssh_identity) {
-        push(@ssh_options, '-i', $ssh_identity);
-      } else {
-        WARN "No SSH identity provided (option ssh_identity is not set) for: $url";
-      }
-      %info = (
-        %info,
-        RSH_TYPE     => "ssh",
-        SSH_USER     => $ssh_user,
-        SSH_IDENTITY => $ssh_identity,
-        SSH_PORT     => $ssh_port,
-        RSH          => ['ssh', @ssh_options, $ssh_user . '@' . $host ],
-       );
-    }
-  }
-
-  return \%info;
-}
-
-
-sub vinfo_copy_flags($$)
-{
-  my $vinfo = shift // die;
-  my $copy_src = shift // die;
-  foreach (qw( HOST
-               RSH_TYPE
-               SSH_USER
-               SSH_IDENTITY
-               SSH_PORT
-               RSH
-            ) )
-  {
-    $vinfo->{$_} = $copy_src->{$_} if(exists $copy_src->{$_});
+    CONFIG     => $config,
   }
 }
 
 
-sub vinfo_child($$)
+sub vinfo_child($$;$)
 {
   my $parent = shift || die;
   my $rel_path = shift // die;
+  my $config = shift;   # override parent config
   my $name = $rel_path;
   my $subvol_dir = "";
   $subvol_dir = $1 if($name =~ s/^(.*)\///);
 
   my $vinfo = {
+    HOST         => $parent->{HOST},
     NAME         => $name,
-    URL          => "$parent->{URL}/$rel_path",
     PATH         => "$parent->{PATH}/$rel_path",
     PRINT        => "$parent->{PRINT}/$rel_path",
+    URL          => "$parent->{URL}/$rel_path",
     URL_PREFIX   => $parent->{URL_PREFIX},
     SUBVOL_PATH  => $rel_path,
     SUBVOL_DIR   => $subvol_dir,  # SUBVOL_PATH=SUBVOL_DIR/NAME
+    CONFIG       => $config // $parent->{CONFIG},
    };
-  vinfo_copy_flags($vinfo, $parent);
 
   # TRACE "vinfo_child: created from \"$parent->{PRINT}\": $info{PRINT}";
   return $vinfo;
+}
+
+
+sub vinfo_rsh($;@)
+{
+  my $vinfo = shift || die;
+  my %opts = @_;
+  my $host = $vinfo->{HOST};
+  return undef unless(defined($host));
+
+  my $config = $vinfo->{CONFIG};
+  die unless($config);
+
+  my $ssh_port        = config_key($config, "ssh_port");
+  my $ssh_user        = config_key($config, "ssh_user");
+  my $ssh_identity    = config_key($config, "ssh_identity");
+  my $ssh_compression = config_key($config, "ssh_compression");
+  my $ssh_cipher_spec = config_key($config, "ssh_cipher_spec") // "default";
+  my @ssh_options;
+  push(@ssh_options, '-p', $ssh_port) if($ssh_port ne "default");
+  push(@ssh_options, '-c', $ssh_cipher_spec) if($ssh_cipher_spec ne "default");
+  if($ssh_identity) {
+    push(@ssh_options, '-i', $ssh_identity);
+  } else {
+    WARN_ONCE "No SSH identity provided (option ssh_identity is not set) for: " . ($vinfo->{CONFIG}->{url} // $vinfo->{PRINT});
+  }
+  if($opts{disable_compression}) {
+    push(@ssh_options, '-o', 'compression=no');  # force ssh compression=no (in case it is defined in ssh_config)
+  } elsif($ssh_compression) {
+    push(@ssh_options, '-C');
+  }
+  return ['ssh', @ssh_options, $ssh_user . '@' . $host ];
+}
+
+
+sub vinfo_cmd($$@)
+{
+  my $vinfo = shift || die;
+  my $cmd = shift || die;
+  my @cmd_args = @_;
+  my $ret;
+  my $backend = $vinfo->{HOST} ? config_key($vinfo, "backend_remote") : config_key($vinfo, "backend_local");
+  $backend = $backend // config_key($vinfo, "backend") // die;
+  my $cmd_mapped = $backend_cmd_map{$backend}{$cmd};
+  if(defined($cmd_mapped)) {
+    TRACE "vinfo_cmd: found mapping for backend=$backend cmd=\"$cmd\": " . join(' ', @$cmd_mapped);
+    $ret = [ @$cmd_mapped, @cmd_args ];
+  }
+  else {
+    my @ret_cmd = split(/\s/, $cmd);
+    die unless($ret_cmd[0] eq 'btrfs');
+    TRACE "vinfo_cmd: no mapping found for backend=$backend cmd=\"$cmd\", assuming btrfs-progs: " . join(' ', @ret_cmd);
+    $ret = [ @ret_cmd, @cmd_args ];
+  }
+  return $ret;
 }
 
 
@@ -1713,8 +1934,7 @@ sub vinfo_init_root($;@)
       my $mnt_tree_root = $url_cache{$vol->{URL_PREFIX} . $mnt_path};
       unless($mnt_tree_root) {
         # read btrfs tree for the mount point
-        my $mnt_vol = vinfo($vol->{URL_PREFIX} . $mnt_path);
-        vinfo_copy_flags($mnt_vol, $vol);
+        my $mnt_vol = vinfo($vol->{URL_PREFIX} . $mnt_path, $vol->{CONFIG});
         unless($id) {
           DEBUG "No subvolid provided in btrfs mounts for: $mnt_path";
           unless($id) {
@@ -1888,19 +2108,17 @@ sub vinfo_prefixed_keys($$)
     $ret{$prefix . lc($_)} = $vinfo->{$_};
   }
   $ret{$prefix . "subvol"} = $vinfo->{PATH};
-  $ret{$prefix . "rsh"} = ($vinfo->{RSH} ? join(" ", @{$vinfo->{RSH}}) : undef),
+  my $rsh = vinfo_rsh($vinfo);
+  $ret{$prefix . "rsh"} = ($rsh ? join(" ", @$rsh) : undef),
   return %ret;
 }
 
 
-sub vinfo_assign_config($$)
+sub vinfo_assign_config($)
 {
   my $vinfo = shift || die;
-  my $config = shift || die;
-
+  my $config = $vinfo->{CONFIG} || die;
   die if($config->{VINFO});
-  die if($vinfo->{CONFIG});
-  $vinfo->{CONFIG} = $config;
   $config->{VINFO} = $vinfo;
 }
 
@@ -2150,12 +2368,14 @@ sub get_latest_snapshot_child($$)
 }
 
 
-sub check_file($$;$$)
+sub check_file($$;@)
 {
   my $file = shift // die;
   my $accept = shift || die;
-  my $key = shift;  # only for error text
-  my $config_file = shift;  # only for error text
+  my %opts = @_;
+  my $key = $opts{config_key};  # only for error text
+  my $config_file = $opts{config_file};  # only for error text
+  my $sanitize = $opts{sanitize};
 
   my $match = $file_match;
   $match = $glob_match if($accept->{wildcards});
@@ -2193,9 +2413,11 @@ sub check_file($$;$$)
     ERROR "Illegal directory traversal for option \"$key\" in \"$config_file\" line $.: $file" if($key && $config_file);
     return undef;
   }
-  $file =~ s/\/+/\//g;     # sanitize multiple slash
-  $file =~ s/\/\.\//\//g;  # sanitize "/./" -> "/"
-  $file =~ s/\/$// unless($file eq '/');   # remove trailing slash
+  if($sanitize) {
+    $file =~ s/\/+/\//g;     # sanitize multiple slash
+    $file =~ s/\/\.\//\//g;  # sanitize "/./" -> "/"
+    $file =~ s/\/$// unless($file eq '/');   # remove trailing slash
+  }
   return $file;
 }
 
@@ -2215,7 +2437,7 @@ sub check_url($;$$)
     $url_prefix = "ssh://" . $1;
   }
 
-  return ( $url_prefix, check_file($url, { absolute => 1 }, $key, $config_file) );
+  return ( $url_prefix, check_file($url, { absolute => 1 }, sanitize => 1, config_key => $key, config_file => $config_file) );
 }
 
 
@@ -2264,6 +2486,20 @@ sub config_preserve_hash($$)
   }
   $ret->{dow} = config_key($config, "preserve_day_of_week");
   return $ret;
+}
+
+
+sub config_compress_hash($$)
+{
+  my $config = shift || die;
+  my $config_key = shift || die;
+  my $compress_key = config_key($config, $config_key);
+  return undef unless($compress_key);
+  return {
+    key     => $compress_key,
+    level   => config_key($config, $config_key . "_level"),
+    threads => config_key($config, $config_key . "_threads"),
+  };
 }
 
 
@@ -2348,7 +2584,7 @@ sub append_config_option($$$$;$)
   elsif($opt->{accept_file})
   {
     # be very strict about file options, for security sake
-    $value = check_file($value, $opt->{accept_file}, $key, $config_file);
+    $value = check_file($value, $opt->{accept_file}, sanitize => 1, config_key => $key, config_file => $config_file);
     return undef unless(defined($value));
 
     TRACE "option \"$key=$value\" is a valid file, accepted";
@@ -2470,7 +2706,7 @@ sub parse_config_line($$$$$)
       TRACE "config: context changed to: $cur->{CONTEXT}";
     }
     # be very strict about file options, for security sake
-    my $rel_path = check_file($value, { relative => 1, wildcards => 1 }, $key, $file);
+    my $rel_path = check_file($value, { relative => 1, wildcards => 1 }, sanitize => 1, config_key => $key, config_file => $file);
     return undef unless(defined($rel_path));
 
     TRACE "config: adding subvolume \"$rel_path\" to volume context: $cur->{url}";
@@ -2710,11 +2946,9 @@ sub macro_send_receive(@)
                  }
     }
     $ret = btrfs_send_to_file($source, $target, $parent, \$vol_received,
-                              compress         => config_key($config_target, "raw_target_compress"),
-                              compress_level   => config_key($config_target, "raw_target_compress_level"),
-                              compress_threads => config_key($config_target, "raw_target_compress_threads"),
-                              encrypt          => $encrypt,
-                              rate_limit       => config_key($config_target, "rate_limit"),
+                              compress   => config_compress_hash($config_target, "raw_target_compress"),
+                              encrypt    => $encrypt,
+                              rate_limit => config_key($config_target, "rate_limit"),
                              );
     ABORTED($config_target, "Failed to send subvolume to raw file") unless($ret);
   }
@@ -2724,6 +2958,9 @@ sub macro_send_receive(@)
   }
 
   # inject fake vinfo
+
+  # NOTE: it's not possible to add (and compare) correct target $detail
+  # from btrfs_send_receive(), as source detail also has fake uuid.
   if($ret) {
     vinfo_inject_child($target, $vol_received, {
       # NOTE: this is not necessarily the correct parent_uuid (on
@@ -3757,7 +3994,7 @@ MAIN:
       push(@{$config->{SUBSECTION}}, $config_sroot);
 
       my $sroot = vinfo($sroot_url, $config_sroot);
-      vinfo_assign_config($sroot, $config_sroot);
+      vinfo_assign_config($sroot);
       unless(vinfo_init_root($sroot, resolve_subdir => 1)) {
         ABORTED($sroot, "Failed to fetch subvolume detail" . ($err ? ": $err" : ""));
         WARN "Skipping archive source \"$sroot->{PRINT}\": $abrt";
@@ -3765,7 +4002,7 @@ MAIN:
       }
 
       my $droot = vinfo($droot_url, $config_droot);
-      vinfo_assign_config($droot, $config_droot);
+      vinfo_assign_config($droot);
       unless(vinfo_init_root($droot, resolve_subdir => 1)) {
         DEBUG("Failed to fetch subvolume detail" . ($err ? ": $err" : ""));
         unless(system_mkdir($droot)) {
@@ -4000,15 +4237,15 @@ MAIN:
   foreach my $config_vol (@{$config->{SUBSECTION}}) {
     die unless($config_vol->{CONTEXT} eq "volume");
     my $sroot = vinfo($config_vol->{url}, $config_vol);
-    vinfo_assign_config($sroot, $config_vol);
+    vinfo_assign_config($sroot);
     foreach my $config_subvol (@{$config_vol->{SUBSECTION}}) {
       die unless($config_subvol->{CONTEXT} eq "subvolume");
-      my $svol = vinfo_child($sroot, $config_subvol->{rel_path});
-      vinfo_assign_config($svol, $config_subvol);
+      my $svol = vinfo_child($sroot, $config_subvol->{rel_path}, $config_subvol);
+      vinfo_assign_config($svol);
       foreach my $config_target (@{$config_subvol->{SUBSECTION}}) {
         die unless($config_target->{CONTEXT} eq "target");
         my $droot = vinfo($config_target->{url}, $config_target);
-        vinfo_assign_config($droot, $config_target);
+        vinfo_assign_config($droot);
       }
     }
   }
@@ -4268,8 +4505,8 @@ MAIN:
           DEBUG "Creating raw subvolume list: $droot->{PRINT}";
           $droot->{SUBVOL_LIST} = [];
           my $ret = run_cmd(
-            cmd => [ 'find', $droot->{PATH} . '/', '-maxdepth', '1', '-type', 'f' ],
-            rsh => $droot->{RSH},
+            cmd => [ 'find', { unsafe => $droot->{PATH} . '/' }, '-maxdepth', '1', '-type', 'f' ],
+            rsh => vinfo_rsh($droot),
             # note: use something like this to get the real (link resolved) path
             # cmd => [ "find", $droot->{PATH} . '/', "-maxdepth", "1", "-name", "$snapshot_basename.\*.raw\*", '-printf', '%f\0', '-exec', 'realpath', '-z', '{}', ';' ],
             non_destructive => 1,
@@ -4576,7 +4813,7 @@ MAIN:
           unless($found) {
             my $latest_snapshot = get_latest_snapshot_child($sroot, $svol);
             push @data, { type => "latest_snapshot",
-                          status => ($latest_snapshot->{node}{cgen} == $svol->{node}{gen}) ? "up-to-date" : undef,
+                          status => ($latest_snapshot && ($latest_snapshot->{node}{cgen} == $svol->{node}{gen})) ? "up-to-date" : undef,
                           vinfo_prefixed_keys("source", $svol),
                           vinfo_prefixed_keys("snapshot", $latest_snapshot), # all unset if no $latest_snapshot
                         };
@@ -4653,8 +4890,8 @@ MAIN:
               DEBUG "[raw] delete:";
               DEBUG "[raw]   file: $_->{PRINT}" foreach(@delete);
               $ret = run_cmd({
-                cmd  => ['rm', (map { $_->{PATH} } @delete) ],
-                rsh  => $droot->{RSH},
+                cmd  => ['rm', (map { { unsafe => $_->{PATH} } } @delete) ],
+                rsh  => vinfo_rsh($droot),
               });
             } else {
               $ret = 0;
