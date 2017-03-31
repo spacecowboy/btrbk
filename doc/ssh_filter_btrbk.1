@@ -1,4 +1,4 @@
-.TH "ssh_filter_btrbk" "1" "2016-11-16" "btrbk v0.24.0" ""
+.TH "ssh_filter_btrbk" "1" "2017-03-18" "btrbk v0.25.0" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -20,11 +20,15 @@ the "\-\-source", "\-\-target", "\-\-delete" and "\-\-info" options.
 Note that the following btrfs commands are always allowed: "btrfs
 subvolume show", "btrfs subvolume list".
 .PP
+Note that commands for stream compression (pipes through gzip, pigz,
+bzip2, pbzip2, xz, lzo, lz4) as well as rate limiting (pipes through
+"pv -L") are always allowed.
+.PP
 Example line in /root/.ssh/authorized_keys on a backup target host:
 .PP
 .RS 4
 .nf
-command="ssh_filter_btrbk.sh \-\-target \-\-delete \-\-compress \-\-restrict\-path /mnt/btr_backup" ssh\-rsa AAAAB3NzaC1...hwumXFRQBL btrbk@mydomain.com
+command="ssh_filter_btrbk.sh \-\-target \-\-delete \-\-restrict\-path /mnt/btr_backup" ssh\-rsa AAAAB3NzaC1...hwumXFRQBL btrbk@mydomain.com
 .fi
 .RE
 .SH OPTIONS
@@ -89,7 +93,8 @@ Log ACCEPT and REJECT messages to the system log.
 .PP
 \-\-sudo
 .RS 4
-Call SSH_ORIGINAL_COMMAND using sudo.
+Allow btrfs commands to be called via sudo. Enable this if you have
+"backend btrfs-progs-sudo" in your btrbk configuration file.
 .RE
 .SH AVAILABILITY
 Please refer to the btrbk project page \fBhttp://digint.ch/btrbk/\fR

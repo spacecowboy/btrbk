@@ -50,7 +50,7 @@ Prerequisites
 
   * [btrfs-progs]: Btrfs filesystem utilities >= v3.18.2
   * [Perl interpreter]: Probably already installed on your system
-  * [OpenSSH]: If you want to tranfer backups from/to remote locations
+  * [OpenSSH]: If you want to transfer backups from/to remote locations
 
   [btrfs-progs]: http://www.kernel.org/pub/linux/kernel/people/kdave/btrfs-progs/
   [Perl interpreter]: https://www.perl.org
@@ -259,7 +259,7 @@ regular basis:
     #!/bin/sh
     exec /usr/sbin/btrbk -q run
 
-Note that you can run btrbk more than once an hour, e.g. by by calling
+Note that you can run btrbk more than once an hour, e.g. by calling
 `sudo btrbk run` from the command line. With this setup, all those
 extra snapshots will be kept for 18 hours.
 
@@ -406,15 +406,21 @@ Please refer to [ssh_filter_btrbk(1)] for a description of the
 of the "authorized_keys" file format.
 
 Also consider setting up ssh access for a user dedicated to btrbk and
-either set suid root on ssh_filter_btrbk.sh or use the "--sudo" option
-and configure /etc/sudoers accordingly. For even more security, you
-can setup a chroot environment in /etc/ssh/sshd_config (see
-[sshd_config(5)]).
+choose either:
+
+  - `backend btrfs-progs-btrbk` to completely get rid of
+    ssh_filter_btrbk.sh, in conjunction with [btrfs-progs-btrbk],
+  - `backend btrfs-progs-sudo`, configure /etc/sudoers, and consider
+    using "ssh_filter_btrbk.sh --sudo" option.
+
+For even more security, set up a chroot environment in
+/etc/ssh/sshd_config (see [sshd_config(5)]).
 
 
   [ssh_filter_btrbk(1)]: http://digint.ch/btrbk/doc/ssh_filter_btrbk.html
   [sshd(8)]: http://www.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man8/sshd.8
   [sshd_config(5)]: http://www.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man5/sshd_config.5
+  [btrfs-progs-btrbk]: https://github.com/digint/btrfs-progs-btrbk
 
 
 Restoring Backups

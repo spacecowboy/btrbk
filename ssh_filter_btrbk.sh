@@ -6,11 +6,11 @@ set -u
 export PATH=/sbin:/bin:/usr/sbin:/usr/bin
 
 enable_log=
-use_sudo=
 restrict_path_list=
 allow_list=
 allow_exact_list=
-allow_compress=
+allow_rate_limit=1
+allow_compress=1
 compress_list="gzip|pigz|bzip2|pbzip2|xz|lzo|lz4"
 
 log_cmd()
@@ -41,7 +41,7 @@ reject_and_die()
 run_cmd()
 {
     log_cmd "auth.info" "btrbk ACCEPT"
-    eval " $use_sudo $SSH_ORIGINAL_COMMAND"
+    eval " $SSH_ORIGINAL_COMMAND"
 }
 
 reject_filtered_cmd()
@@ -67,8 +67,14 @@ reject_filtered_cmd()
         compress_match=
     fi
 
+    if [[ -n "$allow_rate_limit" ]]; then
+        rate_limit_match="( \| pv -q -L [0-9]+[kmgt]?)?"
+    else
+        rate_limit_match=
+    fi
+
     # allow multiple paths (e.g. "btrfs subvolume snapshot <src> <dst>")
-    btrfs_cmd_match="^${decompress_match}(${allow_list})( ${option_match})*( ${path_match})+${compress_match}$"
+    btrfs_cmd_match="^${decompress_match}(${allow_list})( ${option_match})*( ${path_match})+${compress_match}${rate_limit_match}$"
 
     if [[ $SSH_ORIGINAL_COMMAND =~ $btrfs_cmd_match ]] ; then
         return 0
@@ -83,9 +89,11 @@ reject_filtered_cmd()
 }
 
 
-
-allow_cmd "btrfs subvolume show"; # subvolume queries are always allowed
-allow_cmd "btrfs subvolume list"; # subvolume queries are always allowed
+# check for "--sudo" option before processing other options
+sudo_prefix=
+for key; do
+    [[ "$key" == "--sudo" ]] && sudo_prefix="sudo -n "
+done
 
 while [[ "$#" -ge 1 ]]; do
     key="$1"
@@ -96,7 +104,7 @@ while [[ "$#" -ge 1 ]]; do
           ;;
 
       --sudo)
-          use_sudo="sudo"
+          # already processed above
           ;;
 
       -p|--restrict-path)
@@ -105,40 +113,40 @@ while [[ "$#" -ge 1 ]]; do
           ;;
 
       -s|--source)
-          allow_cmd "btrfs subvolume snapshot"
-          allow_cmd "btrfs send"
+          allow_cmd "${sudo_prefix}btrfs subvolume snapshot"
+          allow_cmd "${sudo_prefix}btrfs send"
           ;;
 
       -t|--target)
-          allow_cmd "btrfs receive"
+          allow_cmd "${sudo_prefix}btrfs receive"
           # the following are needed if targets point to a directory
           allow_cmd "readlink"
           allow_exact_cmd "cat /proc/self/mounts"
           ;;
 
       -c|--compress)
-          allow_compress=1
+          # deprecated option, compression is always allowed
           ;;
 
       -d|--delete)
-          allow_cmd "btrfs subvolume delete"
+          allow_cmd "${sudo_prefix}btrfs subvolume delete"
           ;;
 
       -i|--info)
-          allow_cmd "btrfs subvolume find-new"
-          allow_cmd "btrfs filesystem usage"
+          allow_cmd "${sudo_prefix}btrfs subvolume find-new"
+          allow_cmd "${sudo_prefix}btrfs filesystem usage"
           ;;
 
       --snapshot)
-          allow_cmd "btrfs subvolume snapshot"
+          allow_cmd "${sudo_prefix}btrfs subvolume snapshot"
           ;;
 
       --send)
-          allow_cmd "btrfs send"
+          allow_cmd "${sudo_prefix}btrfs send"
           ;;
 
       --receive)
-          allow_cmd "btrfs receive"
+          allow_cmd "${sudo_prefix}btrfs receive"
           ;;
 
       *)
@@ -148,6 +156,9 @@ while [[ "$#" -ge 1 ]]; do
     esac
     shift
 done
+
+allow_cmd "${sudo_prefix}btrfs subvolume show"; # subvolume queries are always allowed
+allow_cmd "${sudo_prefix}btrfs subvolume list"; # subvolume queries are always allowed
 
 # remove leading "|" on alternation lists
 allow_list=${allow_list#\|}
@@ -164,7 +175,7 @@ case "$SSH_ORIGINAL_COMMAND" in
     *\<*)     reject_and_die "unsafe character"     ;;
     *\>*)     reject_and_die "unsafe character"     ;;
     *\`*)     reject_and_die "unsafe character"     ;;
-    *\|*)     [[ -n "$allow_compress" ]] || reject_and_die "unsafe character (compression disallowed)" ;;
+    *\|*)     [[ -n "$allow_compress" ]] || [[ -n "$allow_rate_limit" ]] || reject_and_die "unsafe character (compression disallowed)" ;;
 esac
 
 reject_filtered_cmd

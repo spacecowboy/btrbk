@@ -1,4 +1,4 @@
-.TH "btrbk.conf" "5" "2016-11-16" "btrbk v0.24.0" ""
+.TH "btrbk.conf" "5" "2017-03-18" "btrbk v0.25.0" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -19,6 +19,9 @@ defined either globally or within a section.
 The options specified always apply to the last section encountered,
 superseding the values set in upper-level sections. This means that
 global options must be set before any sections are defined.
+.PP
+Blank lines are ignored. A hash character (#) starts a comment
+extending until end of line.
 .SH SECTIONS
 .PP
 \fBvolume\fR  <volume\-directory>|<url>
@@ -43,7 +46,7 @@ Target type and directory where the backup subvolumes are to be
 created. See the TARGET TYPES section for supported
 \fI<type>\fR. Multiple \fItarget\fR sections are allowed within
 \fIsubvolume\fR sections. A \fItarget\fR section defined in the global
-context or in a \fIvolume\fR section is propagated (mulitplied) to all
+context or in a \fIvolume\fR section is propagated (multiplied) to all
 underlying \fIsubvolume\fR sections, unless a target with the same
 declaration already exists (hint: run "btrbk config print" to see the
 resulting configuration).
@@ -80,9 +83,9 @@ target_url source_url parent_url message".
 \fBtransaction_syslog\fR  <facility>
 .RS 4
 If set, all transactions (as described in \fItransaction_log\fR above)
-are logged to syslog. The facility parameter accepts a lowercase
-syslog facility name, like \[lq]daemon\[rq] or \[lq]local7\[rq]. The
-program name used in the messages is "btrbk".
+are logged to syslog. The program name used in the messages is
+"btrbk".  Accepted parameters for \fI<facility>\fR: user, mail, daemon,
+auth, lpr, news, cron, authpriv, local0..local7.
 .RE
 .PP
 \fBtimestamp_format\fR  short|long|long\-iso
@@ -262,7 +265,9 @@ Number of threads to use for <compress_command>. Only supported for
 .RS 4
 Limit the transfer to a maximum of \fI<rate>\fR bytes per second. A
 suffix of "k", "m", "g", or "t" can be added to denote kilobytes
-(*1024), megabytes, and so on. Defaults to \[lq]no\[rq].
+(*1024), megabytes, and so on. Defaults to \[lq]no\[rq]. If enabled
+for remote sources, make sure that the "pv" command is available on
+the source host.
 .RE
 .PP
 \fBlockfile\fR  <file>
@@ -279,22 +284,30 @@ If set, make sure the deletion of snapshot and backup subvolumes are
 committed to disk when btrbk terminates. Defaults to \[lq]no\[rq].
 .RE
 .PP
-\fBbackend\fR  btrfs-progs|btrfs-progs-btrbk  \fI*experimental*\fR
+\fBbackend\fR  btrfs-progs|btrfs-progs-btrbk|btrfs-progs-sudo
 .RS 4
-Btrfs filesystem utilities to be used for subvolume operations. If set
+Backend filesystem utilities to be used for btrfs specific operations. The
+default \[lq]btrfs-progs\[rq] simply executes btrfs(8) commands groups
+(e.g. "btrfs subvolume show").
+.IP \[bu] 2
+If set
 to \[lq]btrfs-progs-btrbk\[rq], specific btrfs(8) commands groups
 needs to be separated by a dash instead of a whitespace
 (e.g. "btrfs-subvolume-show" instead of "btrfs subvolume
 show"). Useful for setting suid or file capabilities (setcap) on
 specific btrfs commands, as implemented in
-<https://github.com/digint/btrfs-progs-btrbk>. For convenience, it is
-also possible to set \fIbackend_local\fR or \fIbackend_remote\fR,
-which will override the \fIbackend\fR option for local or remote
-sources/targets. Defaults to \[lq]btrfs-progs\[rq].
-.RE
+<https://github.com/digint/btrfs-progs-btrbk>.
+.IP \[bu] 2
+If set to \[lq]btrfs-progs-sudo\[rq], btrfs commands are prefixed with
+"sudo -n" (e.g. "sudo -n btrfs subvolume show" instead of "btrfs
+subvolume show"). Make sure to have apropriate (root) permissions for
+"btrfs" command groups in /etc/sudoers.
 .PP
-Lines that contain a hash character (#) in the first column are
-treated as comments.
+For convenience, it is also possible to set \fIbackend_local\fR or
+\fIbackend_remote\fR options, which will override the backend only for
+local or remote sources/targets (e.g. "backend_remote
+btrfs-progs-btrbk").
+.RE
 .SH RETENTION POLICY
 btrbk uses separate retention policies for snapshots and backups,
 which are defined by the \fIsnapshot_preserve_min\fR,
@@ -395,7 +408,7 @@ backups (btrbk does not delete any raw files)!
 Additional options for raw targets:
 .PP
 .RS 4
-raw_target_compress  gzip|bzip2|xz|no
+raw_target_compress  gzip|pigz|bzip2|pbzip2|xz|lzo|lz4|no
 .PD 0
 .PP
 raw_target_compress_level  default|<number>
@@ -403,6 +416,8 @@ raw_target_compress_level  default|<number>
 raw_target_compress_threads  default|<number>
 .PP
 raw_target_encrypt  gpg|no
+.PP
+raw_target_split  <size>|no
 .PP
 raw_target_block_size  <number>  (defaults to 128K)
 .PP
