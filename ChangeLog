@@ -1,6 +1,9 @@
 btrbk-current
 
   * Add "stream_buffer" configuration option (close #154).
+  * Replace (deprecate) "-r, --resume-only" command line option in
+    favor of new options: "-b, --backup-only" (in conjunction with
+    "-p, --preserve-only"), and "-s, --snapshot-only" (close #150).
 
 btrbk-0.25.0
 

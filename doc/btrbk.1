@@ -8,7 +8,8 @@ btrbk \- backup tool for btrfs volumes
 .SH SYNOPSIS
 .nf
 \fBbtrbk\fR [\-h|\-\-help] [\-\-version] [\-c|\-\-config <file>]
-      [\-n|\-\-dry\-run] [\-p|\-\-preserve] [\-r|\-\-resume\-only]
+      [\-n|\-\-dry\-run] [\-p|\-\-preserve]
+      [\-s|\-\-snapshot\-only] [\-b|\-\-backup\-only]
       [\-v|\-\-verbose] [\-q|\-\-quiet] [\-l|\-\-loglevel <level>]
       [\-t|\-\-table] [\-\-format <output\-format>]
       [\-\-progress] [\-\-print\-schedule]
@@ -65,10 +66,18 @@ Preserve all snapshots and backups. Skips deletion of any snapshots
 and backups, even if specified in the configuration file.
 .RE
 .PP
-\-r, \-\-resume-only
+\-s, \-\-snapshot-only
 .RS 4
-Resume only. Skips snapshot creation, only resumes missing backups to
-satisfy the target retention policy.
+Snapshot only. Skips backup creation (transfers to target locations)
+and deletion. Only creates missing snapshots (in order to satisfy the
+\fIsnapshot_create\fR configuration option).
+.RE
+.PP
+\-b, \-\-backup-only
+.RS 4
+Backup only. Skips snapshot creation and deletion, transfers (and
+deletes) missing backups in order to satisfy the target retention
+policy. Unless "\-p, \-\-preserve" option is set,
 .RE
 .PP
 \-v, \-\-verbose
