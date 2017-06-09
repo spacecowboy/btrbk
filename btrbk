@@ -3480,6 +3480,11 @@ sub print_header(@)
   if($args{info}) {
     print "\n" . join("\n", grep(defined, @{$args{info}})) . "\n";
   }
+  if($args{options} && (scalar @{$args{options}})) {
+    print "\nOptions:\n    ";
+    print join("\n    ", @{$args{options}});
+    print "\n";
+  }
   if($args{legend}) {
     print "\nLegend:\n    ";
     print join("\n    ", @{$args{legend}});
@@ -4205,8 +4210,12 @@ MAIN:
           }
         }
 
+        my @cmdline_options;
+        push @cmdline_options, "preserve: Preserved all archives" if($preserve_all);
+
         print_header(title => "Archive Summary",
                      time => $start_time,
+                     options => \@cmdline_options,
                      legend => [
                        "++.  created directory",
                        "---  deleted subvolume",
@@ -4218,7 +4227,7 @@ MAIN:
         print join("\n", @out);
 
         if($exit_status || scalar(@unrecoverable)) {
-          print "\nNOTE: Some errors occurred, which may result in missing backups!\n";
+          print "\nNOTE: Some errors occurred, which may result in missing archives!\n";
           print "Please check warning and error messages above.\n";
           print join("\n", @unrecoverable) . "\n" if(@unrecoverable);
         }
@@ -5418,9 +5427,15 @@ MAIN:
           }
         }
 
+        my @cmdline_options;
+        push @cmdline_options, "snapshot-only: No backups processed" if($snapshot_only);
+        push @cmdline_options, "backup-only: No snapshots processed" if($backup_only);
+        push @cmdline_options, "preserve: Preserved all snapshots and backups" if($preserve_all);
+
         print_header(title => "Backup Summary",
                      config => $config,
                      time => $start_time,
+                     options => \@cmdline_options,
                      legend => [
                        "===  up-to-date subvolume (source snapshot)",
                        "+++  created subvolume (source snapshot)",
@@ -5432,12 +5447,6 @@ MAIN:
 
         print join("\n", @out);
 
-        if($backup_only) {
-          print "\nNOTE: No snapshots created (option -r present)\n";
-        }
-        if($preserve_all) {
-          print "\nNOTE: Preserved all snapshots and backups (option \"-p, --preserve\" present)\n";
-        }
         if($exit_status || scalar(@unrecoverable)) {
           print "\nNOTE: Some errors occurred, which may result in missing backups!\n";
           print "Please check warning and error messages above.\n";
