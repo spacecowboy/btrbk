@@ -5140,7 +5140,7 @@ MAIN:
     # create backups
     #
     if($snapshot_only) {
-      INFO "Skipping backups (option \"-s, --snapshot-only\" present)";
+      INFO "Skipping backup creation (option \"-s, --snapshot-only\" present)";
     }
     else {
       foreach my $sroot (vinfo_subsection($config, 'volume')) {
