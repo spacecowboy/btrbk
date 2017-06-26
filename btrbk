@@ -244,9 +244,10 @@ my %raw_info_sort = (
   RECEIVED_UUID        => 3,
   RECEIVED_PARENT_UUID => 4,
   INCOMPLETE           => 5,
-  source_url           => 6,   # TODO: maybe add a flag to enable/disable this (it might leak information)
-  parent_url           => 7,   #
-  target_url           => 8,   #
+  # disabled for now, as its not very useful and might leak information
+  #source_url           => 6,
+  #parent_url           => 7,
+  #target_url           => 8,
   compress             => 9,
   split                => 10,
   encrypt              => 11,
@@ -1336,7 +1337,7 @@ sub btrfs_send_to_file($$$;$$)
     TYPE => 'raw',
     RECEIVED_UUID => $received_uuid,
     INCOMPLETE => 1,
-    source_url => $source->{URL},
+    # source_url => $source->{URL},
    );
 
   my $target_filename = $source->{NAME} || die;
@@ -1506,8 +1507,8 @@ sub btrfs_send_to_file($$$;$$)
 
   $raw_info{FILE} = $target_filename;
   $raw_info{RECEIVED_PARENT_UUID} = $parent_uuid if($parent_uuid);
-  $raw_info{parent_url} = $parent->{URL} if($parent);
-  $raw_info{target_url} = $vol_received->{URL};
+  # $raw_info{parent_url} = $parent->{URL} if($parent);
+  # $raw_info{target_url} = $vol_received->{URL};
   $$ret_raw_info = \%raw_info if($ret_raw_info);
 
   print STDOUT "Creating raw backup: $vol_received->{PRINT}\n" if($show_progress && (not $dryrun));
