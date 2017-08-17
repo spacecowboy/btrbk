@@ -1,3 +1,8 @@
+btrbk-current
+
+  * Bugfix: accept mbuffer command (stream_compress) in
+    ssh_filter_btrbk.sh
+
 btrbk-0.25.1
 
   * Support for btrfs-progs v4.12: fix parsing of "btrfs sub show"
