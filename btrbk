@@ -46,7 +46,7 @@ use Carp qw(confess);
 use Getopt::Long qw(GetOptions);
 use Time::Local qw( timelocal timegm timegm_nocheck );
 
-our $VERSION         = '0.25.1-dev';
+our $VERSION         = '0.26.0-dev';
 our $AUTHOR          = 'Axel Burri <axel@tty0.ch>';
 our $PROJECT_HOME    = '<http://digint.ch/btrbk/>';
 
@@ -107,9 +107,9 @@ my %config_options = (
   ssh_cipher_spec             => { default => "default", accept_regexp => qr/^$ssh_cipher_match(,$ssh_cipher_match)*$/ },
   rate_limit                  => { default => undef,     accept => [ "no" ], accept_regexp => qr/^[0-9]+[kmgtKMGT]?$/, require_bin => 'pv' },
   stream_buffer               => { default => undef,     accept => [ "no" ], accept_regexp => qr/^[0-9]+[kmgKMG%]?$/ },  # NOTE: requires 'mbuffer' command on target
-  transaction_log             => { default => undef,     accept_file => { absolute => 1 } },
-  transaction_syslog          => { default => undef,     accept => \@syslog_facilities },
-  lockfile                    => { default => undef,     accept_file => { absolute => 1 }, context => [ "root" ] },
+  transaction_log             => { default => undef,     accept => [ "no" ], accept_file => { absolute => 1 } },
+  transaction_syslog          => { default => undef,     accept => [ "no", @syslog_facilities ] },
+  lockfile                    => { default => undef,     accept => [ "no" ], accept_file => { absolute => 1 }, context => [ "root" ] },
 
   stream_compress             => { default => undef,     accept => [ "no", (keys %compression) ] },
   stream_compress_level       => { default => "default", accept => [ "default" ], accept_numeric => 1 },
@@ -855,28 +855,37 @@ sub btrfs_subvolume_show($)
 
   return undef unless(defined($ret));
 
-  my $real_path;
-  if($ret =~ /^($file_match)/) {
-    $real_path = $1;
-    $real_path = check_file($real_path, { absolute => 1 }, sanitize => 1);
-    return undef unless(defined($real_path));
-    DEBUG "Real path for subvolume \"$vol->{PRINT}\" is: $real_path" if($real_path ne $path);
-    $realpath_cache{$vol->{URL}} = $real_path if($real_path ne $path);
+  my @ret_lines = split("\n", $ret);
+  unless(@ret_lines) {
+    ERROR "Failed to parse subvolume detail (unsupported btrfs-progs) for: $vol->{PRINT}";
+    return undef;
   }
-  else {
-    $real_path = $path;
-    WARN "No real path provided by \"btrfs subvolume show\" for subvolume \"$vol->{PRINT}\", using: $path";
+
+  if($ret_lines[0] =~ /^($file_match)/) {
+    # use the resolved full path for realpath_cache (if present)
+    # btrfs-progs <  4.12 prints the full (absolute, resolved) path
+    # btrfs-progs >= 4.12 prints the relative path to btrfs root (or "/" if it is the root)
+    my $real_or_rel_path = $1;
+    if($real_or_rel_path ne '/') {
+      my $real_path = check_file($real_or_rel_path, { absolute => 1 }, sanitize => 1); # returns undef if not absolute
+      if($real_path && ($real_path ne $path)) {
+        DEBUG "Real path for subvolume \"$vol->{PRINT}\" is: $real_path";
+        $realpath_cache{$vol->{URL}} = $real_path;
+      }
+    }
+    else {
+      DEBUG "No real path provided by \"btrfs subvolume show\" for subvolume \"$vol->{PRINT}\"";
+    }
   }
 
   my %detail;
-  if($ret =~ /^\Q$real_path\E is (btrfs root|toplevel subvolume)/) {
+  if($ret_lines[0] =~ / is (btrfs root|toplevel subvolume)$/) {
     # btrfs-progs <  4.4 prints: "<subvol> is btrfs root"
     # btrfs-progs >= 4.4 prints: "<subvol> is toplevel subvolume"
     # btrfs-progs >= 4.8.3 does not enter here, as output shares format with regular subvolumes
     $detail{id} = 5;
   }
-  elsif($ret =~ /^\Q$real_path\E/) {
-    TRACE "btr_detail: found btrfs subvolume: $vol->{PRINT}";
+  else {
     # NOTE: received_uuid is not required here, as btrfs-progs < 4.1 does not give us that information.
     #       no worries, we get this from btrfs_subvolume_list() for all subvols.
     my @required_keys = qw(name uuid parent_uuid id gen cgen top_level readonly);
@@ -921,10 +930,6 @@ sub btrfs_subvolume_show($)
       }
     }
   }
-  else {
-    ERROR "Failed to parse subvolume detail (unsupported btrfs-progs) for: $vol->{PRINT}";
-    return undef;
-  }
 
   if($detail{id} == 5) {
     # NOTE: as of btrfs-progs v4.8.3, we get full output for root
@@ -933,8 +938,6 @@ sub btrfs_subvolume_show($)
     DEBUG "found btrfs root: $vol->{PRINT}";
     %detail = ( id => 5, is_root => 1 );
   }
-
-  $detail{REAL_PATH} = $real_path;
 
   return \%detail;
 }
@@ -966,7 +969,7 @@ sub btrfs_subvolume_list($;@)
 {
   my $vol = shift || die;
   my %opts = @_;
-  my $path = $vol->{PATH} // die;  # deliberately NOT using REAL_PATH here!
+  my $path = $vol->{PATH} // die;
   my @filter_options = ('-a');
   push(@filter_options, '-o') if($opts{subvol_only});
 
@@ -983,14 +986,6 @@ sub btrfs_subvolume_list($;@)
   my @nodes;
   foreach (split(/\n/, $ret))
   {
-    # ID <ID> top level <ID> path <path> where path is the relative path
-    # of the subvolume to the top level subvolume. The subvolume?s ID may
-    # be used by the subvolume set-default command, or at mount time via
-    # the subvolid= option. If -p is given, then parent <ID> is added to
-    # the output between ID and top level. The parent?s ID may be used at
-    # mount time via the subvolrootid= option.
-
-    # NOTE: btrfs-progs prior to v3.17 do not support the -R flag (unsupported since
     my %node;
     unless(/^ID ([0-9]+) gen ([0-9]+) cgen ([0-9]+) top level ([0-9]+) parent_uuid ([0-9a-z-]+) received_uuid ([0-9a-z-]+) uuid ([0-9a-z-]+) path (.+)$/) {
       ERROR "Failed to parse subvolume list (unsupported btrfs-progs) for: $vol->{PRINT}";
@@ -1724,7 +1719,7 @@ sub _fill_url_cache
   my $node = shift;
   my $abs_path = shift;
   my $node_subdir = shift;
-  # TRACE "_fill_url_cache: $abs_path";
+  TRACE "_fill_url_cache: $abs_path" . ($node_subdir ? " (subdir=$node_subdir)" : "");
 
   # traverse tree from given node and update tree cache
   $url_cache{$abs_path} = $node unless(defined($node_subdir));
@@ -1953,7 +1948,6 @@ sub vinfo_init_root($;@)
   my $vol = shift || die;
   my %opts = @_;
   my $tree_root;
-  my @fill_cache;
 
   # use cached info if present
   $tree_root = $url_cache{$vol->{URL}};
@@ -1966,15 +1960,10 @@ sub vinfo_init_root($;@)
     }
   }
 
-  # TODO: replace the subvolume_show part as soon as resolve_subdir stuff has stabilized
   unless($tree_root) {
     # url_cache miss, read the subvolume detail
     my $detail = btrfs_subvolume_show($vol);
     if($detail) {
-      my $real_path = $realpath_cache{$vol->{URL}};
-      push @fill_cache, $vol->{URL};
-      push @fill_cache, $vol->{URL_PREFIX} . $real_path if($real_path && (not $url_cache{$vol->{URL_PREFIX} . $real_path}));
-
       # check uuid_cache
       if($detail->{uuid}) {
         $tree_root = $uuid_cache{$detail->{uuid}};
@@ -1984,9 +1973,26 @@ sub vinfo_init_root($;@)
         # cache miss, read the fresh tree
         $tree_root = btr_tree($vol, $detail->{id});
       }
+
+      # fill cache
+      if($tree_root) {
+        _fill_url_cache($tree_root, $vol->{URL});
+        my $real_path = $realpath_cache{$vol->{URL}};
+        if($real_path) {
+          my $real_url = $vol->{URL_PREFIX} . $real_path;
+          _fill_url_cache($tree_root, $real_url) unless($url_cache{$real_url});
+        }
+      }
     }
     elsif($opts{resolve_subdir}) {
       # $vol is not a subvolume, read btrfs tree from mount point
+
+      # NOTE: for now, this is only used for send-receive targets (in
+      # order to allow subdirs within btrfs filesystems).
+
+      # TODO: use this (replace the subvolume_show part) for source
+      # volumes if we decide to allow subdirs.
+
       my ($mnt_path, $real_path, $id) = btrfs_mountpoint($vol);
       return undef unless($mnt_path && $real_path);
       my $mnt_tree_root = $url_cache{$vol->{URL_PREFIX} . $mnt_path};
@@ -2003,7 +2009,6 @@ sub vinfo_init_root($;@)
           }
         }
         $mnt_tree_root = btr_tree($mnt_vol, $id);
-        TRACE "url_cache fill: $mnt_vol->{PRINT}";
         _fill_url_cache($mnt_tree_root, $mnt_vol->{URL});
       }
 
@@ -2018,7 +2023,6 @@ sub vinfo_init_root($;@)
       $vol->{NODE_SUBDIR} = $node_subdir if($node_subdir ne '');
       $tree_root = $ret->{node};
 
-      TRACE "url_cache fill: $vol->{PRINT}" . ($vol->{NODE_SUBDIR} ? " (subdir=$vol->{NODE_SUBDIR})" : "");
       _fill_url_cache($tree_root, $vol->{URL}, $vol->{NODE_SUBDIR});
     }
     else {
@@ -2026,12 +2030,6 @@ sub vinfo_init_root($;@)
     }
   }
   return undef unless($tree_root);
-
-  # fill cache if needed
-  foreach (@fill_cache) {
-    TRACE "url_cache fill: $_";
-    _fill_url_cache($tree_root, $_);
-  }
 
   $vol->{node} = $tree_root;
 
@@ -4554,6 +4552,16 @@ MAIN:
         WARN "Skipping subvolume \"$svol->{PRINT}\": $abrt";
         next;
       }
+      if($svol->{node}{readonly}) {
+        ABORTED($svol, "subvolume is readonly");
+        WARN "Skipping subvolume \"$svol->{PRINT}\": $abrt";
+        next;
+      }
+      if($svol->{node}{received_uuid} ne '-') {
+        ABORTED($svol, "\"Received UUID\" is set");
+        WARN "Skipping subvolume \"$svol->{PRINT}\": $abrt";
+        next;
+      }
       if($svol->{node}{uuid} && _is_child_of($sroot->{node}, $svol->{node}{uuid})) {
         DEBUG "Found \"$svol->{PRINT}\" (id=$svol->{node}{id}) in btrfs subtree of: $sroot->{PRINT}";
       } else {
@@ -4757,6 +4765,7 @@ MAIN:
     my @stats_data;
     my $stats_snapshots_total = 0;
     my $stats_backups_total = 0;
+    my $stats_backups_total_correlated = 0;
     my $stats_backups_total_incomplete = 0;
     my $stats_backups_total_orphaned = 0;
     if($action_resolve eq "snapshots")
@@ -4809,9 +4818,10 @@ MAIN:
           $stats_snapshots_total += scalar(@snapshot_children);  # NOTE: this adds ALL snaphot children under $sroot (not only the ones created by btrbk!)
 
           foreach my $droot (vinfo_subsection($svol, 'target')) {
-            my $stats_received = 0;
+            my $stats_correlated = 0;
             my $stats_orphaned = 0;
             my $stats_incomplete = 0;
+            my $target_up_to_date = 0;
             foreach my $target_vol (@{vinfo_subvol_list($droot, sort => 'path')}) {
               my $parent_snapshot;
               my $incomplete_backup;
@@ -4829,13 +4839,15 @@ MAIN:
                 }
               }
               if($parent_snapshot) {
-                $stats_received++;
+                $stats_correlated++;
+                my $up_to_date = ($parent_snapshot->{node}{cgen} == $svol->{node}{gen});
                 push @data, { type => "received",
                               vinfo_prefixed_keys("target", $target_vol),
                               vinfo_prefixed_keys("snapshot", $parent_snapshot),
                               vinfo_prefixed_keys("source", $svol),
-                              status => ($parent_snapshot->{node}{cgen} == $svol->{node}{gen}) ? "up-to-date" : undef,
+                              status => $up_to_date ? "up-to-date" : undef,
                             };
+                $target_up_to_date ||= $up_to_date;
               }
               else {
                 # don't display all subvolumes in $droot, only the ones matching snapshot_name
@@ -4854,12 +4866,14 @@ MAIN:
                 }
               }
             }
-            my $stats_total = $stats_received + $stats_incomplete + $stats_orphaned;
+            my $stats_total = $stats_correlated + $stats_incomplete + $stats_orphaned;
             $stats_backups_total            += $stats_total;
+            $stats_backups_total_correlated += $stats_correlated;
             $stats_backups_total_incomplete += $stats_incomplete;
             $stats_backups_total_orphaned   += $stats_orphaned;
             my @stats_detail;
-            push @stats_detail, "$stats_orphaned orphaned"     if($stats_orphaned);
+            push @stats_detail, "up-to-date" if($target_up_to_date);
+            push @stats_detail, "$stats_correlated correlated" if($stats_correlated);
             push @stats_detail, "$stats_incomplete incomplete" if($stats_incomplete);
             my $stats_detail_print = join(', ', @stats_detail);
             $stats_detail_print = "   ($stats_detail_print)" if($stats_detail_print);
@@ -4908,8 +4922,8 @@ MAIN:
                    config => $config,
                    time   => $start_time,
                    legend => [
-                     "up-to-date: latest snapshot is up to date with parent subvolume",
-                     "orphaned  : parent snapshot was deleted (by snapshot_preserve policy)",
+                     "up-to-date: latest snapshot/backup is up to date with source subvolume",
+                     "correlated: corresponding (reveived-from) source snapshot is present",
                     ],
                   );
 
@@ -4917,7 +4931,7 @@ MAIN:
       print "\n";
       my $stats_filter = $config->{CMDLINE_FILTER_LIST} ? join("; ", @{$config->{CMDLINE_FILTER_LIST}}) : "";
       my @stats_total_detail;
-      push @stats_total_detail, "$stats_backups_total_orphaned orphaned"     if($stats_backups_total_orphaned);
+      push @stats_total_detail, "$stats_backups_total_correlated correlated" if($stats_backups_total_correlated);
       push @stats_total_detail, "$stats_backups_total_incomplete incomplete" if($stats_backups_total_incomplete);
       my $stats_total_detail_print = join(', ', @stats_total_detail);
       $stats_total_detail_print = " ($stats_total_detail_print)" if($stats_total_detail_print);
