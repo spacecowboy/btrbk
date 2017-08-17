@@ -1,8 +1,9 @@
 btrbk-current
 
-  * Replace (deprecate) "-r, --resume-only" command line option in
-    favor of new options: "-b, --backup-only" (in conjunction with
-    "-p, --preserve-only"), and "-s, --snapshot-only" (close #150).
+  * Add "resume" command, replacement for "-r, --resume-only" command
+    line option (which is now deprecated).
+  * Add "snapshot" command (close #150).
+  * Add "--preserve-snapshots" and "--preserve-backups" options.
 
 btrbk-0.25.1
 
